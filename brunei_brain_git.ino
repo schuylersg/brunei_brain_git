@@ -8,6 +8,8 @@
 //Constants
 const unsigned int MAX_INTEGRATION_TIME = 10000;
 const unsigned int MIN_INTEGRATION_TIME = 10;
+const unsigned int BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
+const unsigned int PIXEL_TRANSFER_SPACING = 5;
 
 const byte ACK = 6;
 const byte NAK = 21;
@@ -41,7 +43,7 @@ boolean receivingData = false;
 //index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
 char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "Abs"};  
 uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_60, CG_70, CG_80};
-uint16_t ledIntegrationTime [] = {2000, 1000, 400, 255, 256, 100};  //array for initial integration times for each LED
+uint16_t ledIntegrationTime [] = {5000, 5000, 3000, 2000, 1000, 100};  //array for initial integration times for each LED
                                                                           //the last one is for absorbance source
 
 RTCDateTime currentTime;  //global variable to store the current date and time
@@ -145,6 +147,22 @@ void setup(){
   Blink(greenLED, 500, 6);
   clearSerial();
   
+  //Set boxcar average
+  Serial.write('B');
+  Serial.write(highByte(BOXCAR_WIDTH));
+  Serial.write(lowByte(BOXCAR_WIDTH));
+  delay(10);
+  clearSerial();
+
+  //set Pixel Mode
+  Serial.write('P');
+  Serial.write(highByte(0));
+  Serial.write(lowByte(1));
+  Serial.write(highByte(PIXEL_TRANSFER_SPACING));
+  Serial.write(lowByte(PIXEL_TRANSFER_SPACING));
+  delay(10);
+  clearSerial();
+  
   Serial.write('a');                    //change the spectrometer to ASCII mode
   Serial.write('A');
   Serial.flush();
@@ -153,19 +171,16 @@ void setup(){
 }
 
 void loop(){
-/*
+
   Serial.write('b');                    //change the spectrometer to ASCII mode
   Serial.write('B');
   delay(10);
   clearSerial(); 
   
   //Set the spectrometer integration time
-  byte msb, lsb;
   Serial.print("I");
-  lsb = ledIntegrationTime[readingIteration] & 0xFF;
-  msb = (ledIntegrationTime[readingIteration] & 0xFF00) >> 8;
-  Serial.write(msb);
-  Serial.write(lsb);
+  Serial.write(highByte(ledIntegrationTime[readingIteration]));
+  Serial.write(lowByte(ledIntegrationTime[readingIteration]));
   delay(10);
   clearSerial();
   
@@ -173,13 +188,6 @@ void loop(){
   Serial.write('A');
   delay(10);
   clearSerial(); 
-  
-  logFile.print("Free = ");
-  logFile.println(freeRam());
-  logFile.print("RI = ");
-  logFile.println(readingIteration);
-  logFile.flush();
-*/
 
   //wait until the spectrometer is ready
   clearSerial();
@@ -197,7 +205,7 @@ void loop(){
   
     
   //Start the scan
-  
+  digitalWrite(blueLED, HIGH);
   Serial.write('S');
   Serial.flush();
   delay(10);
@@ -228,6 +236,7 @@ void loop(){
   while(Serial.available() == 0){
   }
   
+  digitalWrite(blueLED, LOW);
   tlc5916.disableOutput();  //turn off LED once scan has been captured
   while(receivingData){
    while(Serial.available() > 0){
