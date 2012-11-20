@@ -9,7 +9,7 @@
 const unsigned int MAX_INTEGRATION_TIME = 10000;
 const unsigned int MIN_INTEGRATION_TIME = 10;
 const unsigned int BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
-const unsigned int PIXEL_TRANSFER_SPACING = 5;
+const unsigned int PIXEL_TRANSFER_SPACING = 3;
 
 const byte ACK = 6;
 const byte NAK = 21;
@@ -41,9 +41,9 @@ boolean justWokeUp = true;
 boolean receivingData = false;
 
 //index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
-char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "Abs"};  
+char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL"};  
 uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_60, CG_70, CG_80};
-uint16_t ledIntegrationTime [] = {5000, 5000, 3000, 2000, 1000, 100};  //array for initial integration times for each LED
+uint16_t ledIntegrationTime [] = {10000, 8000, 6000, 4000, 2000, 1000};  //array for initial integration times for each LED
                                                                           //the last one is for absorbance source
 
 RTCDateTime currentTime;  //global variable to store the current date and time
@@ -136,8 +136,6 @@ void setup(){
   dataFile.println(dateStr);
   dataFile.close();
   
-  //logFile = SD.open("log.txt", FILE_WRITE);
-  
   pinMode(rtcAlarm, INPUT);            //Interrupt pin for RTC alarm
   
   //Start the TLLC5916 LED driver with pins 4 and 5 controlling the SPI communications
@@ -145,6 +143,13 @@ void setup(){
   
   //Wait for Spec
   Blink(greenLED, 500, 6);
+  clearSerial();
+  
+  //Set trigger to 1 so not running
+  Serial.write('T');
+  Serial.write(0);
+  Serial.write(1);
+  delay(10);
   clearSerial();
   
   //Set boxcar average
@@ -163,11 +168,21 @@ void setup(){
   delay(10);
   clearSerial();
   
+  //Set the spectrometer integration time
+  Serial.write('I');
+  Serial.write(highByte(10000));
+  Serial.write(lowByte(10000));
+  Serial.flush();
+  delay(10);
+  clearSerial();
+  
   Serial.write('a');                    //change the spectrometer to ASCII mode
   Serial.write('A');
   Serial.flush();
   delay(10);
   clearSerial(); 
+ 
+  Blink(greenLED, 500, 10);
 }
 
 void loop(){
@@ -178,17 +193,19 @@ void loop(){
   clearSerial(); 
   
   //Set the spectrometer integration time
-  Serial.print("I");
+  Serial.write('I');
   Serial.write(highByte(ledIntegrationTime[readingIteration]));
   Serial.write(lowByte(ledIntegrationTime[readingIteration]));
+  Serial.flush();
   delay(10);
   clearSerial();
   
   Serial.write('a');                    //change the spectrometer to ASCII mode
   Serial.write('A');
+  Serial.flush();
   delay(10);
   clearSerial(); 
-
+  
   //wait until the spectrometer is ready
   clearSerial();
   
@@ -201,11 +218,18 @@ void loop(){
   tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[readingIteration]);
   tlc5916.ezSetPinsOnOff(1 << readingIteration);
   tlc5916.enableOutput();
-  delay(10);
+    
+  digitalWrite(blueLED, HIGH);  
   
+  //start integration time clock
+  Serial.write('T');
+  Serial.write('0');
+  Serial.write('\n');
+  Serial.flush();
+  delay(10);
+  clearSerial();
     
   //Start the scan
-  digitalWrite(blueLED, HIGH);
   Serial.write('S');
   Serial.flush();
   delay(10);
@@ -252,9 +276,24 @@ void loop(){
   }
   dataFile.println("");
   dataFile.close();
- 
+  
+  //stop integration time clock
+  Serial.write('T');
+  Serial.write('1');
+  Serial.write('\n');
+  Serial.flush();
+  delay(10);
+  clearSerial();
+  
+  Serial.write('L');
+  Serial.write('\n');
+  Serial.flush();
+  clearSerial();
+  
+  delay(ledIntegrationTime[readingIteration]);
+  
   readingIteration++;
-  if(readingIteration == 5){
+  if(readingIteration == 6){
     Blink(blueLED, 500, 3);
     RTC.clearAlarmFlags();         //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
