@@ -1,3 +1,11 @@
+/*Instructions for trigger mode 3 - external hardware trigger
+
+To take a scan send
+'S' with no carriage return or line feed
+This makes the USB4000 ready to be triggerd from the external signal
+Once it is triggered, it will integrate for the given time, and then return the data once it's done
+*/
+
 //Testing GIT - this should only be in USB4000_settings branch
 #include <SPI.h>
 #include <SD.h>
@@ -9,7 +17,7 @@
 const unsigned int MAX_INTEGRATION_TIME = 10000;
 const unsigned int MIN_INTEGRATION_TIME = 10;
 const unsigned int BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
-const unsigned int PIXEL_TRANSFER_SPACING = 3;
+const unsigned int PIXEL_TRANSFER_SPACING = 10;
 
 const byte ACK = 6;
 const byte NAK = 21;
@@ -28,7 +36,7 @@ const byte csRTC = 9;
 const byte fiveVoltEnable = A0;
 const byte twelveVoltEnable = A1;
 
-const byte redLED = 7;
+const byte specTrigger = 7;
 const byte greenLED = A2;
 const byte blueLED = A3;
 const byte batteryVoltage48 = A4;
@@ -52,7 +60,7 @@ RTCDateTime alarmTime;    //global variable to store the current alarm time
 char dateStr[ ] = "00/00/00 00:00:00";          //a character array for printing date/time
 char dataFileName[ ] = "files/MM_DD_YY.txt";	//a character array for the file name
 File dataFile;
-//File logFile;
+File logFile;
 
 char dataBuffer[8];
 int incomingBytes[6];
@@ -70,11 +78,10 @@ void setup(){
   pinMode(selfReset, OUTPUT);
   digitalWrite(selfReset, LOW);
   
-  pinMode(redLED, OUTPUT);
+  pinMode(specTrigger, OUTPUT);
   pinMode(greenLED, OUTPUT);
   pinMode(blueLED, OUTPUT);
   
-  Blink(redLED, 300, 1);
   Blink(greenLED, 300, 1);
   Blink(blueLED, 300, 1);
   
@@ -97,7 +104,7 @@ void setup(){
   //see if the SD card is present and can be initialized:
 
   if (!SD.begin(csSD)) {
-    Blink(redLED, 300, 3);
+    Blink(blueLED, 300, 3);
     digitalWrite(selfReset, HIGH);
   }else{
     Blink(greenLED, 300, 1);    //1st green blink
@@ -107,7 +114,7 @@ void setup(){
   RTC.clearAlarmFlags();               //clear the alarm flags because we don't know what state the RTC was in
   currentTime = RTC.getRTCDateTime();  //need to do this initial read - otherwise strange bug occurs
                                        //where SD.open() fails the first time.
-  dateTime2String(currentTime);        //convert date and time to human readable string
+  dateTime2String(&currentTime);        //convert date and time to human readable string
                                        //which is stored in the variable dateStr
     
   //set the file name to the current date
@@ -116,7 +123,7 @@ void setup(){
   dataFileName [9] = currentTime.days/10 + '0';
   dataFileName [10] = currentTime.days%10 + '0';  
   dataFileName [12] = currentTime.year/10 + '0';
-  dataFileName [13] = currentTime.year%10 + '0';    
+  dataFileName [13] = currentTime.year%10 + '0';     
     
   dataFile = SD.open(dataFileName, FILE_WRITE);  
   openTries = 1;
@@ -128,7 +135,7 @@ void setup(){
   }
   
   if(!dataFile){                        //If unable to open the file
-    Blink(redLED, 300, 3);
+    Blink(blueLED, 300, 3);
     digitalWrite(selfReset, HIGH);      //try doing a restart
   }
   
@@ -145,24 +152,17 @@ void setup(){
   Blink(greenLED, 500, 6);
   clearSerial();
   
-  //Set trigger to 1 so not running
-  Serial.write('T');
-  Serial.write(0);
-  Serial.write(1);
-  delay(10);
-  clearSerial();
-  
   //Set boxcar average
   Serial.write('B');
-  Serial.write(highByte(BOXCAR_WIDTH));
-  Serial.write(lowByte(BOXCAR_WIDTH));
+  Serial.write(0);
+  Serial.write(5);
   delay(10);
   clearSerial();
 
   //set Pixel Mode
   Serial.write('P');
-  Serial.write(highByte(0));
-  Serial.write(lowByte(1));
+  Serial.write(0);
+  Serial.write(1);
   Serial.write(highByte(PIXEL_TRANSFER_SPACING));
   Serial.write(lowByte(PIXEL_TRANSFER_SPACING));
   delay(10);
@@ -176,17 +176,25 @@ void setup(){
   delay(10);
   clearSerial();
   
+  //Set trigger to 2 external synchronization
+  Serial.write('T');
+  Serial.write(0);
+  Serial.write(3);
+  Serial.flush();
+  delay(10);
+  clearSerial();
+  
   Serial.write('a');                    //change the spectrometer to ASCII mode
   Serial.write('A');
   Serial.flush();
   delay(10);
   clearSerial(); 
- 
-  Blink(greenLED, 500, 10);
+  
 }
 
 void loop(){
 
+  /*
   Serial.write('b');                    //change the spectrometer to ASCII mode
   Serial.write('B');
   delay(10);
@@ -200,6 +208,7 @@ void loop(){
   delay(10);
   clearSerial();
   
+
   Serial.write('a');                    //change the spectrometer to ASCII mode
   Serial.write('A');
   Serial.flush();
@@ -208,26 +217,19 @@ void loop(){
   
   //wait until the spectrometer is ready
   clearSerial();
+
   
   if(!USB4000Ready()){
-    Blink(redLED, 1000, 1);  
+    Blink(blueLED, 1000, 1);  
     goto endloop;
   }
-  
+*/  
   tlc5916.disableOutput();
   tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[readingIteration]);
   tlc5916.ezSetPinsOnOff(1 << readingIteration);
   tlc5916.enableOutput();
     
-  digitalWrite(blueLED, HIGH);  
-  
-  //start integration time clock
-  Serial.write('T');
-  Serial.write('0');
-  Serial.write('\n');
-  Serial.flush();
-  delay(10);
-  clearSerial();
+  digitalWrite(blueLED, HIGH);
     
   //Start the scan
   Serial.write('S');
@@ -235,11 +237,13 @@ void loop(){
   delay(10);
   //The first value is 'S' echo
   //The second value is etx or stx
+
+
   Serial.readBytes(dataBuffer, 2);
 
   if(dataBuffer[0] != 'S' || dataBuffer[1] == 3){  //error with Spec
-    Blink(redLED, 1000, 1);
-    receivingData = false;
+    Blink(blueLED, 1000, 1);  
+    goto endloop;
   }else{
     receivingData = true;  
     dataFile = SD.open(dataFileName, FILE_WRITE);  
@@ -250,16 +254,20 @@ void loop(){
       openTries++;
     }  
     if(!dataFile){                        //If unable to open the file
-      Blink(redLED, 300, 3);
+      Blink(blueLED, 300, 3);
       digitalWrite(selfReset, HIGH);      //try doing a restart
     }
-
   }
+  
+   
+  digitalWrite(specTrigger, HIGH);
+  delay(10);
+  digitalWrite(specTrigger, LOW);
   
   //wait here until spectrum begins
   while(Serial.available() == 0){
   }
-  
+
   digitalWrite(blueLED, LOW);
   tlc5916.disableOutput();  //turn off LED once scan has been captured
   while(receivingData){
@@ -276,21 +284,7 @@ void loop(){
   }
   dataFile.println("");
   dataFile.close();
-  
-  //stop integration time clock
-  Serial.write('T');
-  Serial.write('1');
-  Serial.write('\n');
-  Serial.flush();
-  delay(10);
   clearSerial();
-  
-  Serial.write('L');
-  Serial.write('\n');
-  Serial.flush();
-  clearSerial();
-  
-  delay(ledIntegrationTime[readingIteration]);
   
   readingIteration++;
   if(readingIteration == 6){
@@ -310,27 +304,27 @@ endloop:
 }
 
 //convert the RTCDateTime structure to human readable string
-void dateTime2String(RTCDateTime dt){
+void dateTime2String(RTCDateTime * dt){
 
   //"00 / 00 / 00   00 : 00 : 00"
   // 01 2 34 5 67 8 90 1 23 4 56
-  dateStr[6] = dt.year/10 + '0';
-  dateStr[7] = dt.year%10 + '0';
+  dateStr[6] = dt->year/10 + '0';
+  dateStr[7] = dt->year%10 + '0';
 
-  dateStr[0] = dt.months/10 + '0';
-  dateStr[1] = dt.months%10 + '0';
+  dateStr[0] = dt->months/10 + '0';
+  dateStr[1] = dt->months%10 + '0';
 
-  dateStr[3] = dt.days/10 + '0';
-  dateStr[4] = dt.days%10 + '0';    
+  dateStr[3] = dt->days/10 + '0';
+  dateStr[4] = dt->days%10 + '0';    
 
-  dateStr[9] = dt.hours/10 + '0';
-  dateStr[10] = dt.hours%10 + '0';    
+  dateStr[9] = dt->hours/10 + '0';
+  dateStr[10] = dt->hours%10 + '0';    
 
-  dateStr[12] = dt.minutes/10 + '0';
-  dateStr[13] = dt.minutes%10 + '0';    
+  dateStr[12] = dt->minutes/10 + '0';
+  dateStr[13] = dt->minutes%10 + '0';    
 
-  dateStr[15] = dt.seconds/10 + '0';
-  dateStr[16] = dt.seconds%10 + '0';    
+  dateStr[15] = dt->seconds/10 + '0';
+  dateStr[16] = dt->seconds%10 + '0';    
 }
 
 //Interrupt service routine called when the RTC alarm interrupt fires
@@ -429,25 +423,27 @@ boolean USB4000Ready(){
   logFile.flush();
   */
   if(incomingBytes[1] == 21){
-//    digitalWrite(redLED, LOW);
+//    digitalWrite(blueLED, LOW);
 //    delay(300);
 //    digitalWrite(blueLED, LOW);
     return true;
   }else{
 //    digitalWrite(blueLED, LOW);
 //    delay(300);
-//    digitalWrite(redLED, LOW);
+//    digitalWrite(blueLED, LOW);
     return false;
   }
 }
 
 void clearSerial(){
-    //logFile.println("CS");
+  logFile = SD.open("logFiles.log", FILE_WRITE); 
+  logFile.println("CS");
   while(Serial.available() > 0){        //clear the serial port
     //logFile.println(Serial.available());
-    Serial.read();
+    logFile.write(Serial.read());
     delay(5);
   }
+  logFile.close();
 }
 
 void Blink (byte pin, int timing, int blinks){
