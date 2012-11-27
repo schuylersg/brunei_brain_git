@@ -37,6 +37,15 @@ const byte fiveVoltEnable = A0;
 const byte twelveVoltEnable = A1;
 
 const byte specTrigger = 7;
+uint8_t const rgbLEDs [] = {7, A2, A3};
+const byte RED =     0b00000001;
+const byte GREEN =   0b00000010;
+const byte BLUE =    0b00000100;
+const byte YELLOW =  0b00000011;
+const byte TEAL =    0b00000110;
+const byte PURPLE =  0b00000101;
+const byte WHITE =   0b00000111;
+
 const byte greenLED = A2;
 const byte blueLED = A3;
 const byte batteryVoltage48 = A4;
@@ -45,8 +54,8 @@ const byte batteryVoltage37 = A5;
 
 //GLOBAL VARIABLES
 int readingIteration = 0;
-boolean justWokeUp = true;
 boolean receivingData = false;
+uint8_t errorValue = 0;
 
 //index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
 char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL"};  
@@ -74,16 +83,19 @@ void setup(){
   
   //Initialize pins
   pinMode(fiveVoltEnable, OUTPUT);
-  
   pinMode(selfReset, OUTPUT);
   digitalWrite(selfReset, LOW);
-  
   pinMode(specTrigger, OUTPUT);
   pinMode(greenLED, OUTPUT);
   pinMode(blueLED, OUTPUT);
   
-  Blink(greenLED, 300, 1);
-  Blink(blueLED, 300, 1);
+  Blink(RED, 300, 1);
+  Blink(GREEN, 300, 1);
+  Blink(BLUE, 300, 1);
+  Blink(YELLOW, 300, 1);
+  Blink(TEAL, 300, 1);
+  Blink(PURPLE, 300, 1);
+  Blink(WHITE, 300, 1); 
   
   //Initialize chip select control pinspins
   pinMode(10, OUTPUT);    //Arduino defined chip select
@@ -104,10 +116,10 @@ void setup(){
   //see if the SD card is present and can be initialized:
 
   if (!SD.begin(csSD)) {
-    Blink(blueLED, 300, 3);
+    Blink(BLUE, 300, 3);
     digitalWrite(selfReset, HIGH);
   }else{
-    Blink(greenLED, 300, 1);    //1st green blink
+    Blink(GREEN, 300, 1);    //1st green blink
   }
   
   RTC.begin(csRTC);                    //initialize RTC with chip select pin
@@ -135,7 +147,7 @@ void setup(){
   }
   
   if(!dataFile){                        //If unable to open the file
-    Blink(blueLED, 300, 3);
+    Blink(BLUE, 300, 3);
     digitalWrite(selfReset, HIGH);      //try doing a restart
   }
   
@@ -149,7 +161,7 @@ void setup(){
   tlc5916.begin(ledOutputEnable,ledLatchEnable);
   
   //Wait for Spec
-  Blink(greenLED, 500, 6);
+  Blink(GREEN, 500, 6);
   clearSerial();
   
   //Set boxcar average
@@ -188,7 +200,12 @@ void setup(){
   Serial.write('A');
   Serial.flush();
   delay(10);
-  clearSerial(); 
+  clearSerial();
+  
+initializeError:
+  if(errorValue > 0){
+    
+  }
   
 }
 
@@ -242,7 +259,7 @@ void loop(){
   Serial.readBytes(dataBuffer, 2);
 
   if(dataBuffer[0] != 'S' || dataBuffer[1] == 3){  //error with Spec
-    Blink(blueLED, 1000, 1);  
+    Blink(BLUE, 1000, 1);  
     goto endloop;
   }else{
     receivingData = true;  
@@ -254,7 +271,7 @@ void loop(){
       openTries++;
     }  
     if(!dataFile){                        //If unable to open the file
-      Blink(blueLED, 300, 3);
+      Blink(BLUE, 300, 3);
       digitalWrite(selfReset, HIGH);      //try doing a restart
     }
   }
@@ -288,7 +305,7 @@ void loop(){
   
   readingIteration++;
   if(readingIteration == 6){
-    Blink(blueLED, 500, 3);
+    Blink(BLUE, 500, 3);
     RTC.clearAlarmFlags();         //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
     setRTCAlarm(15, 0, 0);          //set the alarm for 20 minutes from now
@@ -446,11 +463,15 @@ void clearSerial(){
   logFile.close();
 }
 
-void Blink (byte pin, int timing, int blinks){
+void Blink (uint8_t color, int timing, int blinks){
   for(int i = 0 ; i< blinks; i++){
-    digitalWrite(pin , HIGH);
+    digitalWrite(rgbLEDs[0], bitRead(color, 0));
+    digitalWrite(rgbLEDs[1], bitRead(color, 1));
+    digitalWrite(rgbLEDs[2], bitRead(color, 2));
     delay(timing);
-    digitalWrite(pin , LOW);  
+    digitalWrite(rgbLEDs[0] , LOW);
+    digitalWrite(rgbLEDs[1] , LOW);
+    digitalWrite(rgbLEDs[2] , LOW);
     delay(timing);
   }
 }
