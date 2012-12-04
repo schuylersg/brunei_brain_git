@@ -253,6 +253,7 @@ void setup(){
   if(fileOpenError){
      logFile.print("Config Not Read\t");
   }
+  logFile.print("hello");
   logFile.flush();
   
   //set the file name to the current date
