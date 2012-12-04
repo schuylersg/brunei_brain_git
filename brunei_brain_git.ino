@@ -120,10 +120,7 @@ char data = 0;
 uint8_t startLoc = 0;
 int i;
 
-<<<<<<< HEAD
 
-=======
->>>>>>> parent of 7042194... Code for test on 11/30
 /*************************************************************************
 Setup() runs once on startup. It does the foloowing:
 1. Initializes all I/O pins
@@ -146,6 +143,20 @@ void setup(){
   pinMode(greenLED, OUTPUT);
   pinMode(blueLED, OUTPUT);
   
+  //read the battery voltages
+  analogReference(INTERNAL);  //set the analog reference to the internal 1.1 volts
+  delay(10);
+  for(uint8_t i = 0; i<5; i++){     // The arduino website claims that after changing reference sources
+    analogRead(batteryVoltage37);   // the first few analog reads can be off
+  }
+  delay(10);
+  bv37Analog = analogRead(batteryVoltage37);
+  
+  analogRead(batteryVoltage48);
+  delay(10);
+  bv48Analog = analogRead(batteryVoltage48);
+  
+  
   //Cycle through colors
   Blink(RED, 300, 1);
   Blink(GREEN, 300, 1);
@@ -154,18 +165,6 @@ void setup(){
   Blink(TEAL, 300, 1);
   Blink(PURPLE, 300, 1);
   Blink(WHITE, 300, 1);
-
-  //TODO  
-  //Check 48 Volt Battery Connection and Level
-  /*
-  int battery48 = analogRead(batteryVoltage48)
-  if(battery48 < BATTERY48_NOT_CONNECTED_LEVEL){
-    errorValue =
-    goto initializeError;
-  } else if(battery48 < BATTERY48_WARNING_LEVEL){
-    errorValue =
-  }
-  */
   
   //Initialize chip select control pinspins
   pinMode(10, OUTPUT);        //Arduino defined chip select  
@@ -236,7 +235,6 @@ void setup(){
   }
   
   //open log file
-<<<<<<< HEAD
   //If it doesn't exist, add a top line of header
   if(!SD.exists("LOGFILE.TXT")){
     logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
@@ -256,9 +254,6 @@ void setup(){
      logFile.print("Config Not Read\t");
   }
   logFile.flush();
-=======
-  logFile = SD.open("LOGFILE.TXT", FILE_WRITE); 
->>>>>>> parent of 7042194... Code for test on 11/30
   
   //set the file name to the current date
   dataFileName [6] = currentTime.months/10 + '0';
@@ -372,24 +367,10 @@ initializeError:
 }
 
 void loop(){
-  //Blink(GREEN, 500, loopIteration);
-  
-  
-  //If the integration time is already set, skip ahead
-  /*
-  logFile.print("CIT=");
-  logFile.println(currentIntegrationTime);
-  logFile.print("LIT=");
-  logFile.println(ledIntegrationTime[loopIteration]);
-  logFile.flush();
-  */
-  
+
   if(currentIntegrationTime == ledIntegrationTime[loopIteration]){
     goto doneSettingIntegration;
   }
-  
-  //logFile.println("SET");
-  //logFile.flush();
    
   //Convert binary value into ASCII characters
   dataBuffer[0] = ledIntegrationTime[loopIteration]/10000;
@@ -490,6 +471,8 @@ doneSettingIntegration:
   //USB4000 should immediately respond with 2 bytes
   //The first value is 'S' echo
   //The second value is etx or stx
+  dataBuffer[0] = 0;
+  dataBuffer[1] = 3;
   bytesRead = Serial.readBytes(dataBuffer, 2); 
 
   if(dataBuffer[0] != 'S' || dataBuffer[1] == 3){  //error with Spec
@@ -544,7 +527,6 @@ doneSettingIntegration:
   }
   if(loopIteration == 7){
     dataFile.close();
-<<<<<<< HEAD
     
     logFile.print("Charge Status = ");
     logFile.print(digitalRead(batteryChargerStatus));
@@ -553,13 +535,11 @@ doneSettingIntegration:
     
     dataLogSeconds = dataLogSeconds + 10;
     configParamsChanged = true;
-=======
->>>>>>> parent of 7042194... Code for test on 11/30
     writeConfigFile();                  //update the config file with any changes
     Blink(WHITE, 100, 3);           
     RTC.clearAlarmFlags();              //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
-    setRTCAlarm(15, 0, 0);              //set the alarm for 20 minutes from now
+    setRTCAlarm(dataLogSeconds, dataLogMinutes, dataLogHours);              //set the alarm for 20 minutes from now
     digitalWrite(fiveVoltEnable, LOW);
     sleepNow();
     digitalWrite(fiveVoltEnable, HIGH);
