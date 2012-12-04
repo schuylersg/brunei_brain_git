@@ -15,45 +15,54 @@ Once it is triggered, it will integrate for the given time, and then return the 
 //Constants
 const unsigned int BATTERY48_NOT_CONNECTED_LEVEL = 100;   // Minimum ADC value that we assume means battery is not connected
 const unsigned int BATTERY48_WARNING_LEVEL = 570;         // Set to 43 volts - but not actually implemented yet 
-const unsigned int MAX_INTEGRATION_TIME = 10000;          // The maximum allowed USB4000 integration time
-const unsigned int MIN_INTEGRATION_TIME = 10;             // The minimum allowed USB4000 integration time
+const uint16_t MAX_INTEGRATION_TIME = 10000;              // The maximum allowed USB4000 integration time
+const uint16_t MIN_INTEGRATION_TIME = 10;                 // The minimum allowed USB4000 integration time
 const uint8_t MAX_LOOP_ERRORS = 5;                        // The number of errors in loop() before power cycling
+const uint16_t LAMP_WARM_UP_TIME = 1000;                  // Lamp warm up time in milliseconds
+const uint8_t MINIMUM_ALARM_SECCONDS = 5;                 // The minimum time the alarm can be set for in seconds
 
 const byte ACK = 6;      //ASCII ack used by USB4000
 const byte NAK = 21;     //ASCII nak used by USB4000
 
+const uint8_t WITH_CRLF = 1;
+const uint8_t NO_CRLF = 0;
+
 //Colors
-const byte RED =     0b00000001;
-const byte GREEN =   0b00000010;
-const byte BLUE =    0b00000100;
-const byte YELLOW =  0b00000011;
-const byte TEAL =    0b00000110;
-const byte PURPLE =  0b00000101;
-const byte WHITE =   0b00000111;
+const uint8_t RED =     0b00000001;
+const uint8_t GREEN =   0b00000010;
+const uint8_t BLUE =    0b00000100;
+const uint8_t YELLOW =  0b00000011;
+const uint8_t TEAL =    0b00000110;
+const uint8_t PURPLE =  0b00000101;
+const uint8_t WHITE =   0b00000111;
 
 //Error values
 const uint8_t SD_FAIL = (1<<3) | RED;
 const uint8_t FILE_FAIL = (3<<3) | RED;
 const uint8_t USB4000_FAIL = (5<<3) | RED;
 const uint8_t BATTERY48_NOT_CONNECTED = (3<<3) | YELLOW;
-const uint8_t USB4000_ERROR = (3<<3) | PURPLE;
+const uint8_t USB4000_ERROR_1 = (1<<3) | TEAL;
+const uint8_t USB4000_ERROR_2 = (2<<3) | TEAL;
+const uint8_t USB4000_ERROR_3 = (3<<3) | TEAL;
+const uint8_t USB4000_ERROR_4 = (4<<3) | BLUE;
+const uint8_t USB4000_ERROR_5 = (5<<3) | TEAL;
 
 //PIN ASSIGNMENTS
-const byte SpecRx = 0;
-const byte SpecTx = 1;
-const byte batteryChargerStatus = 2;
-const byte rtcAlarm = 3;
-const byte ledLatchEnable = 4;
-const byte ledOutputEnable = 5;
-const byte selfReset = 6;
-const byte csSD = 8;
-const byte csRTC = 9;
+const uint8_t SpecRx = 0;
+const uint8_t SpecTx = 1;
+const uint8_t batteryChargerStatus = 2;
+const uint8_t rtcAlarm = 3;
+const uint8_t ledLatchEnable = 4;
+const uint8_t ledOutputEnable = 5;
+const uint8_t selfReset = 6;
+const uint8_t csSD = 8;
+const uint8_t csRTC = 9;
 
-const byte fiveVoltEnable = A0;
-const byte twelveVoltEnable = A1;
+const uint8_t fiveVoltEnable = A0;
+const uint8_t twelveVoltEnable = A1;
 
-const byte specTrigger = 7;
-uint8_t const rgbLEDs [] = {7, A2, A3};
+const uint8_t specTrigger = 7;
+const uint8_t rgbLEDs [] = {7, A2, A3};
 
 const byte greenLED = A2;
 const byte blueLED = A3;
@@ -67,16 +76,24 @@ uint8_t loopErrors = 0;          // counts the number of times an error is encou
 uint8_t errorValue = 0;          // holds an error value between 1 and 31, and an LED color
                                  // error value is stored in bits 7 to 3
                                  // color is stored in bits 2 to 0
-                  
+//Data logging settings
+uint8_t dataLogSeconds = 15;
+uint8_t dataLogMinutes = 0;
+uint8_t dataLogHours = 0;
+            
 //USB4000 settings
-unsigned int BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
-unsigned int PIXEL_TRANSFER_SPACING = 10;
+uint16_t BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
+uint16_t PIXEL_TRANSFER_SPACING = 10;
+uint16_t currentIntegrationTime = 0;
 
-//index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
-char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL"};  
-uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10};
-uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 1000};  //array for initial integration times for each LED
-                                                                        //the last one is for absorbance source
+//index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916 (except for last two)
+char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL", "Turbid"};  
+uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10, CG_10};
+uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 50, 50};  // array for initial integration times for each LED
+                                                                          // the last one is for absorbance source
+uint16_t darkSpectrum [] = {0, 0, 0, 0, 0, 0, 0};                         //max is 14 (7 measuments plus 7 dark spectrum
+
+boolean configParamsChanged = false;
 
 RTCDateTime currentTime;  //global variable to store the current date and time
 RTCDateTime alarmTime;    //global variable to store the current alarm time
@@ -86,17 +103,27 @@ char dataFileName[ ] = "files/MM_DD_YY.txt";	//a character array for the file na
 File dataFile;
 File logFile;
 
+//State variables
+uint8_t openTries = 0;  
+uint8_t usb4000Tries = 0;
+uint8_t fileOpenError = 0;
+boolean measuringDarkSpectrum = false;
+uint8_t numDarkSpectrum = 0;
+uint16_t bv37Analog;
+uint16_t bv48Analog;
+
 //helper variables
 int bytesRead;
 char dataBuffer[8];
-int incomingBytes[6];
 int incomingByte;
 char data = 0;
-uint8_t openTries = 0;  
-uint8_t usb4000Tries = 0;
-uint16_t maxValue;
-uint16_t tempValue;
+uint8_t startLoc = 0;
+int i;
 
+<<<<<<< HEAD
+
+=======
+>>>>>>> parent of 7042194... Code for test on 11/30
 /*************************************************************************
 Setup() runs once on startup. It does the foloowing:
 1. Initializes all I/O pins
@@ -168,25 +195,70 @@ void setup(){
                                        //which is stored in the variable dateStr
   
   //If a configuration file exists, load its info  
-  if(SD.exists("config.txt")){
-    dataFile = SD.open("config.txt");
+  //Try to open the config file for reading
+  openTries = 0;
+  do{
+    dataFile = SD.open("CONFIG.TXT", FILE_READ);
+    openTries++;
+  }while(!dataFile && openTries < 4);
+
+  if(dataFile){
+    Blink(GREEN, 300, 1);    //2nd green blink
     while(dataFile.available()){
       data = dataFile.read();
       if (data == 'P'){
-        PIXEL_TRANSFER_SPACING = dataFile.parseInt();
+        PIXEL_TRANSFER_SPACING = (uint16_t) dataFile.parseInt();
       }else if (data == 'B'){
-        BOXCAR_WIDTH = dataFile.parseInt();
-      }else if(data >= 'a' && data <= 'f'){
-        ledIntegrationTime[data - 'a'] = dataFile.parseInt();  
+        BOXCAR_WIDTH = (uint16_t)dataFile.parseInt();
+      }else if (data == 'S'){
+        dataLogSeconds = (uint16_t)dataFile.parseInt();
+      }else if (data == 'M'){
+        dataLogMinutes = (uint16_t)dataFile.parseInt();
+      }else if (data == 'H'){
+        dataLogHours = (uint16_t)dataFile.parseInt();
+      }else if(data >= 'a' && data <= 'g'){
+        ledIntegrationTime[data - 'a'] = (uint16_t) dataFile.parseInt();  
       }
     }
     dataFile.close();
+  }else{
+    Blink(PURPLE, 300, 1);
+    fileOpenError = 1;
   }
   
   //error check to make sure integration times are in correct range
-  for(int i = 0; i<6; i++){
-   ledIntegrationTime[i] = constrain(ledIntegrationTime[i], MIN_INTEGRATION_TIME, MAX_INTEGRATION_TIME);
+  for(i = 0; i<7; i++){
+    int j = constrain(ledIntegrationTime[i], MIN_INTEGRATION_TIME, MAX_INTEGRATION_TIME);
+    if(j != ledIntegrationTime[i]){
+     ledIntegrationTime[i] = j;
+     configParamsChanged = true;
+    }
   }
+  
+  //open log file
+<<<<<<< HEAD
+  //If it doesn't exist, add a top line of header
+  if(!SD.exists("LOGFILE.TXT")){
+    logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
+    logFile.println("Date\t3.7V\t48V\tCharger\tErrors");
+  }else{
+    logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
+  }
+  logFile.print(dateStr);
+  logFile.print('\t');
+  logFile.print(bv37Analog);
+  logFile.print('\t');
+  logFile.print(bv48Analog);
+  logFile.print('\t');
+  logFile.println(digitalRead(batteryChargerStatus));
+  
+  if(fileOpenError){
+     logFile.print("Config Not Read\t");
+  }
+  logFile.flush();
+=======
+  logFile = SD.open("LOGFILE.TXT", FILE_WRITE); 
+>>>>>>> parent of 7042194... Code for test on 11/30
   
   //set the file name to the current date
   dataFileName [6] = currentTime.months/10 + '0';
@@ -195,8 +267,6 @@ void setup(){
   dataFileName [10] = currentTime.days%10 + '0';  
   dataFileName [12] = currentTime.year/10 + '0';
   dataFileName [13] = currentTime.year%10 + '0';     
-      
-  openTries = 0;
   
   //If the directory 'files' does not exist, create it
   if(!SD.exists("files")){
@@ -204,6 +274,7 @@ void setup(){
   }
   
   //Try to open the data file for writing/appending new data
+  openTries = 0;
   do{
     dataFile = SD.open(dataFileName, FILE_WRITE);
     openTries++;
@@ -213,43 +284,47 @@ void setup(){
     errorValue = FILE_FAIL;
     goto initializeError;
   }
-  
-  
-  //dataFile.print("Measurement at: ");
-  //dataFile.println(dateStr);
-  //dataFile.flush();
+
+  logFile.print("FO\t");
+  logFile.flush();
   
   pinMode(rtcAlarm, INPUT);            //Interrupt pin for RTC alarm
   
   //Start the TLLC5916 LED driver with pins 4 and 5 controlling the SPI communications
   tlc5916.begin(ledOutputEnable,ledLatchEnable);
   
-  //Wait for Spec
-  Blink(TEAL, 500, 6);
+  logFile.print("LB\t");
+  logFile.flush();
+  
+  delay(500);
+  //Wait for spectrometer to finish initializing
+  //If everything goes well, green LED will blink times
+  Blink(GREEN, 500, 5);
   
   usb4000Tries = 0;
   do{
+    Blink(GREEN, 500<<usb4000Tries, 1);
     clearSerial();
     Serial.write(' ');
     Serial.flush();
     delay(10);
     incomingByte = Serial.read();
-    Blink(TEAL, 500<<usb4000Tries, 1);
     usb4000Tries++;
   }while(incomingByte != NAK && usb4000Tries < 4);
   
+  //Check if there has been a major failure with the USB4000 startup - if so, restart
   if(incomingByte != NAK){
     errorValue = USB4000_FAIL;
     goto initializeError; 
   }
-  
+    
   //Set boxcar average
   Serial.write('B');
   Serial.write(highByte(BOXCAR_WIDTH));
   Serial.write(lowByte(BOXCAR_WIDTH));
   delay(10);
   if(Serial.read() != ACK){
-    errorValue = USB4000_ERROR;
+    errorValue = USB4000_ERROR_1;
     goto initializeError;   
   }
 
@@ -262,7 +337,7 @@ void setup(){
   Serial.flush();
   delay(10);
   if(Serial.read() != ACK){
-    errorValue = USB4000_ERROR;
+    errorValue = USB4000_ERROR_2;
     goto initializeError;   
   }
   
@@ -273,8 +348,17 @@ void setup(){
   Serial.flush();
   delay(10);
   if(Serial.read() != ACK){
-    errorValue = USB4000_ERROR;
+    errorValue = USB4000_ERROR_3;
     goto initializeError;   
+  }
+  
+  //change the spectrometer to ASCII mode
+  Serial.write('a');
+  Serial.write('A');
+  Serial.flush();
+  if(!asciiACKRead(NO_CRLF)){
+    errorValue = USB4000_ERROR_4;
+    goto initializeError;
   }
   
 initializeError:
@@ -284,73 +368,143 @@ initializeError:
   }
   
   //If program gets here, then everything is working fine
-  Blink(WHITE, 300, 3);
+  Blink(GREEN, 300, 3);
 }
 
 void loop(){
-
-  Serial.write('b');                    //change the spectrometer to ASCII mode
-  Serial.write('B');
-  Serial.flush();
-  delay(10);
-  clearSerial(); 
+  //Blink(GREEN, 500, loopIteration);
+  
+  
+  //If the integration time is already set, skip ahead
+  /*
+  logFile.print("CIT=");
+  logFile.println(currentIntegrationTime);
+  logFile.print("LIT=");
+  logFile.println(ledIntegrationTime[loopIteration]);
+  logFile.flush();
+  */
+  
+  if(currentIntegrationTime == ledIntegrationTime[loopIteration]){
+    goto doneSettingIntegration;
+  }
+  
+  //logFile.println("SET");
+  //logFile.flush();
+   
+  //Convert binary value into ASCII characters
+  dataBuffer[0] = ledIntegrationTime[loopIteration]/10000;
+  dataBuffer[1] = (ledIntegrationTime[loopIteration]%10000)/1000;
+  dataBuffer[2] = (ledIntegrationTime[loopIteration]%1000)/100;
+  dataBuffer[3] = (ledIntegrationTime[loopIteration]%100)/10;
+  dataBuffer[4] = (ledIntegrationTime[loopIteration]%10);
+  
+  //Remove the leading zeros
+  startLoc = 0;
+  while(dataBuffer[startLoc] == 0){
+    startLoc++;
+  }  
   
   //Set the spectrometer integration time
   Serial.write('I');
-  Serial.write(highByte(ledIntegrationTime[loopIteration]));
-  Serial.write(lowByte(ledIntegrationTime[loopIteration]));
   Serial.flush();
   delay(10);
-  if(Serial.read() != ACK){
-    errorValue = USB4000_ERROR;
-    Blink(errorValue && 0b00000111, 500, errorValue >> 3);   
-  }  
+  Serial.read();
 
-  Serial.write('a');                    //change the spectrometer to ASCII mode
-  Serial.write('A');
-  Serial.flush();
-  delay(10);
-  clearSerial(); 
+  while(startLoc<5){
+    Serial.write(dataBuffer[startLoc] + '0');
+    Serial.flush(); 
+    delay(10);
+    Serial.read();  //read the echoed character
+    startLoc++;
+  }
   
-  dataFile.print(LED_NAMES[loopIteration]);
+  Serial.write(13);
+  Serial.flush();
+  delay(20);
+  
+  //check that command received successfully
+  if(!asciiACKRead(WITH_CRLF)){
+    errorValue = USB4000_ERROR_1;
+    Blink(errorValue & 0b00000111, 500, errorValue >> 3);
+    loopErrors++;
+    goto endloop;  
+  }
+  
+  currentIntegrationTime = ledIntegrationTime[loopIteration];
+  
+  //check if we need to take a new dark spectrum
+  measuringDarkSpectrum = true;
+  for(i=0; i < numDarkSpectrum; i++){
+    if(darkSpectrum[i] == currentIntegrationTime){
+      measuringDarkSpectrum = false;
+      break;  //leave for loop because we've already taken a dark spectrum for current integration time
+    }
+  }
+  if(measuringDarkSpectrum){  
+    darkSpectrum[numDarkSpectrum] = currentIntegrationTime;
+    numDarkSpectrum++;
+  }  
+  
+  delay(100);
+  
+doneSettingIntegration:
+  if(measuringDarkSpectrum){
+    dataFile.print("DARK");
+  }else{
+    dataFile.print(LED_NAMES[loopIteration]);
+  }
   dataFile.write(' ');
   dataFile.print(dateStr);  
   dataFile.write(' ');
+  dataFile.flush();
   
   //Check that the USB4000 is ready to take a scan
   if(!USB4000Ready()){
-    Blink(RED, 500, 1);
+    errorValue = USB4000_ERROR_2;
+    Blink(errorValue & 0b00000111, 500, errorValue >> 3);
     loopErrors++;
     goto endloop;
   }
   
-  if(loopIteration < 5){
+  if(measuringDarkSpectrum){
+    //Do nothing
+  } else if(loopIteration < 5){
     tlc5916.disableOutput();
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
     tlc5916.enableOutput();
-  } else{
+  }else if(loopIteration == 5){
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
-    delay(1000); // give time to warm up
+    delay(LAMP_WARM_UP_TIME); // give time to warm up
+  }else{
+    tlc5916.disableOutput();
+    tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
+    tlc5916.ezSetPinsOnOff(0b00011111);  //Turn on all the LEDs
+    tlc5916.enableOutput();
   }
     
   //Start the scan
   Serial.write('S');
   Serial.flush();
-  delay(10);
   
   //USB4000 should immediately respond with 2 bytes
   //The first value is 'S' echo
   //The second value is etx or stx
-  Serial.readBytes(dataBuffer, 2);
+  bytesRead = Serial.readBytes(dataBuffer, 2); 
 
   if(dataBuffer[0] != 'S' || dataBuffer[1] == 3){  //error with Spec
-    Blink(RED, 300, 3);
+    tlc5916.disableOutput();  //turn off LED
+    digitalWrite(twelveVoltEnable, LOW); //turn off absorbance source
+    errorValue = USB4000_ERROR_3;
+    Blink(errorValue & 0b00000111, 500, errorValue >> 3);
+    clearSerial();
     loopErrors++;
     goto endloop;
   }
-
-  Serial.setTimeout(ledIntegrationTime[loopIteration]+1000);
+  
+  delay(30);  //need this for low integration times
+  
+  Serial.setTimeout(ledIntegrationTime[loopIteration] + 500);  //set the timeout to the integration time plus 0.5 second
   
   //Trigger the spectrometer to start scan 
   digitalWrite(specTrigger, HIGH);
@@ -359,52 +513,53 @@ void loop(){
   
   //wait here until spectrum begins transmitting - will timeout if nothing received
   bytesRead = Serial.readBytes(dataBuffer, 1);
+  
+  //Gets here once the USB4000 starts transmitting data
   tlc5916.disableOutput();  //turn off LED once scan has been captured
   digitalWrite(twelveVoltEnable, LOW); //turn off absorbance source
   
   if(bytesRead == 0){ //the read operation timedout so there must have been an error
-    Blink(RED, 500, 1);
+    errorValue = USB4000_ERROR_4;
+    Blink(errorValue & 0b00000111, 500, errorValue >> 3);
+    clearSerial();
     loopErrors++;
-    goto endloop; 
+    goto endloop;
   }
 
   Serial.setTimeout(20);    //set the serial timeout to 20ms (probably can be shorter)
-  tempValue = 6;
-  maxValue = 0;
-  while(Serial.readBytes(dataBuffer, 1)){
+  do{
    digitalWrite(greenLED, HIGH);
-   if(dataBuffer[0] = ' '){
-     dataFile.write(' ');
-     if(tempValue > maxValue && tempValue < 32768){
-       maxValue = tempValue;
-     } 
-   }else if(dataBuffer[0] != '\n' && dataBuffer[0] != '>'){
+   if(dataBuffer[0] == 13 || dataBuffer[0] == '>' || dataBuffer[0] == 10){
+      //do nothing 
+   }else{
      dataFile.write(dataBuffer[0]);
-     tempValue = tempValue*10 + dataBuffer[0]-'0';
    }
    digitalWrite(greenLED, LOW);
-  }
+  }while(Serial.readBytes(dataBuffer, 1));
   dataFile.println("");
   dataFile.flush();  //make sure all the data was written to the SD card
-
-/*  
-  //check if saturating the detector
-  if(maxValue >= 32767 && ledIntegrationTime[loopIteration] < MAX_INTEGRATION_TIME){
-    ledIntegrationTime[loopIteration] = ledIntegrationTime[loopIteration]>>1;  //divide integration time by 2
-    loopIteration--;
-  }else if (maxValue < 16384){             //check if more signal possible
-    ledIntegrationTime[loopIteration] = ledIntegrationTime[loopIteration]<<1; //multiply integration time by 2
-    loopIteration--;
+  
+  if(!measuringDarkSpectrum){
+    loopIteration++;
   }
-*/  
-  loopIteration++;
-  if(loopIteration == 6){
+  if(loopIteration == 7){
     dataFile.close();
-    writeConfigFile();
-    Blink(WHITE, 500, 3);
-    RTC.clearAlarmFlags();         //clear the alarm flags so that they can be triggered later
+<<<<<<< HEAD
+    
+    logFile.print("Charge Status = ");
+    logFile.print(digitalRead(batteryChargerStatus));
+    logFile.println("");
+    logFile.close();
+    
+    dataLogSeconds = dataLogSeconds + 10;
+    configParamsChanged = true;
+=======
+>>>>>>> parent of 7042194... Code for test on 11/30
+    writeConfigFile();                  //update the config file with any changes
+    Blink(WHITE, 100, 3);           
+    RTC.clearAlarmFlags();              //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
-    setRTCAlarm(15, 0, 0);          //set the alarm for 20 minutes from now
+    setRTCAlarm(15, 0, 0);              //set the alarm for 20 minutes from now
     digitalWrite(fiveVoltEnable, LOW);
     sleepNow();
     digitalWrite(fiveVoltEnable, HIGH);
@@ -424,17 +579,27 @@ endloop:
 }
 
 void writeConfigFile(){
+  if(!configParamsChanged){
+    return;
+  }
+  
   SD.remove("config.txt");  //remove the current config file
-  dataFile = SD.open("config.txt", FILE_READ);
+  dataFile = SD.open("config.txt", FILE_WRITE);
   dataFile.print("P=");
   dataFile.println(PIXEL_TRANSFER_SPACING);
   dataFile.print("B=");
   dataFile.println(BOXCAR_WIDTH);
-  for(int i = 0; i < 6; i ++){
-    dataFile.print('a' + i);
+  for(i = 0; i < 6; i ++){
+    dataFile.print((char)('a' + i));
     dataFile.print('=');
     dataFile.println(ledIntegrationTime[i]);    
   }
+  dataFile.print("S=");
+  dataFile.println(dataLogSeconds);
+  dataFile.print("M=");
+  dataFile.println(dataLogMinutes);
+  dataFile.print("H=");
+  dataFile.println(dataLogHours);
   dataFile.close();
 }
 
@@ -469,30 +634,19 @@ void rtcAlarmISR(){
 
 //Function to help set the RTC alarm
 //Sets the alarm to a time (seconds, minutes, hours) from the current time
-//seconds: 0-59
-//minutes: 0-59
-//hours: 0-23
+//input variables can be arbitrary numbers but limiited to 255 by variable size
+//must be at least 5 seconds
 void setRTCAlarm(uint8_t ss, uint8_t mm, uint8_t hh){
+  if(hh == 0 && mm == 0 && ss < MINIMUM_ALARM_SECCONDS)
+    ss=MINIMUM_ALARM_SECCONDS;
+  
   alarmTime.seconds = currentTime.seconds + ss;
-  alarmTime.minutes = currentTime.minutes + mm;
-  alarmTime.hours = currentTime.hours + hh;
+  alarmTime.minutes = currentTime.minutes + mm + alarmTime.seconds/60;  
+  alarmTime.hours = currentTime.hours + hh + alarmTime.minutes/60;
 
-  //cheack that alarmSecond is valid
-  if(alarmTime.seconds > 59){
-    alarmTime.minutes  = alarmTime.minutes  + 1;
-    alarmTime.seconds = alarmTime.seconds - 60;
-  }
-
-  //check that alarmMinute is valid
-  if(alarmTime.minutes >59){
-    alarmTime.minutes = alarmTime.minutes - 60;
-    alarmTime.hours = alarmTime.hours + 1;
-  }
-
-  //check that alarmHour is valid
-  if(alarmTime.hours> 23){
-    alarmTime.hours = alarmTime.hours - 24;
-  } 
+  alarmTime.seconds = alarmTime.seconds%60;
+  alarmTime.minutes = alarmTime.minutes%60;
+  alarmTime.hours = alarmTime.hours%24;
 
   //set the alarm
   RTC.setAlarm1(alarmTime.seconds, alarmTime.minutes, alarmTime.hours);
@@ -537,52 +691,51 @@ void sleepNow(){         // here we put the arduino to sleep
                            // during normal running time.
 }
 
+//check if USB4000 is responding while in ASCII mode
 boolean USB4000Ready(){
+  char bytes [6];
+  int numBytesRead;
+  uint8_t expectedNumBytes = 6;  
   Serial.write(' ');
   Serial.flush();   //wait for transmission to complete
-  delay(50);
-  incomingBytes[0] = Serial.read();
-  incomingBytes[1] = Serial.read();
-  incomingBytes[2] = Serial.read();
-  incomingBytes[3] = Serial.read();
-  incomingBytes[4] = Serial.read();
-  incomingBytes[5] = Serial.read();
-  
-  /*
-  logFile.println(incomingBytes[0]);
-  logFile.println(incomingBytes[1]);
-  logFile.println(incomingBytes[2]);
-  logFile.println(incomingBytes[3]);
-  logFile.println(incomingBytes[4]);
-  logFile.println(incomingBytes[5]);
-  logFile.flush();
-  */
-  if(incomingBytes[1] == 21){
-//    digitalWrite(blueLED, LOW);
-//    delay(300);
-//    digitalWrite(blueLED, LOW);
-    return true;
-  }else{
-//    digitalWrite(blueLED, LOW);
-//    delay(300);
-//    digitalWrite(blueLED, LOW);
+  Serial.setTimeout(100);  //set the timeout to something reasonable
+  numBytesRead = Serial.readBytes(bytes, expectedNumBytes);
+  if(numBytesRead != expectedNumBytes)
     return false;
-  }
+  
+  return (bytes[1] == 21);
 }
 
 void clearSerial(){
-  logFile = SD.open("logFiles.log", FILE_WRITE); 
-  logFile.println("CS");
   while(Serial.available() > 0){        //clear the serial port
-    //logFile.println(Serial.available());
-    logFile.write(Serial.read());
-    delay(5);
+    Serial.read();
+    delay(10);
   }
-  logFile.close();
 }
 
+boolean asciiACKRead(uint8_t mode){
+  char bytes [7];
+  int numBytesRead;
+  uint8_t expectedNumBytes = 7;
+  if(mode == NO_CRLF)
+    expectedNumBytes = 5;
+ 
+  Serial.setTimeout(100);  //set the timeout to something reasonable
+  numBytesRead = Serial.readBytes(bytes, expectedNumBytes);
+  if(numBytesRead != expectedNumBytes)
+    return false;
+
+  if(mode == WITH_CRLF && bytes[2] == ACK)
+    return true;
+  if(mode == NO_CRLF && bytes[0] == ACK)
+    return true;
+    
+  return false;
+}
+
+//Blink the LEDs
 void Blink (uint8_t color, int timing, int blinks){
-  for(int i = 0 ; i< blinks; i++){
+  for(int b = 0 ; b < blinks; b++){
     digitalWrite(rgbLEDs[0], bitRead(color, 0));
     digitalWrite(rgbLEDs[1], bitRead(color, 1));
     digitalWrite(rgbLEDs[2], bitRead(color, 2));
