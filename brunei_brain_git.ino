@@ -87,10 +87,15 @@ uint16_t PIXEL_TRANSFER_SPACING = 10;
 uint16_t currentIntegrationTime = 0;
 
 //index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
-char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL"};  
-uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10};
-uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 1000};  //array for initial integration times for each LED
+char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL", "Turbid"};  
+uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10, CG_10};
+uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 50, 50};  //array for initial integration times for each LED
                                                                         //the last one is for absorbance source
+boolean recordingDarkSpectrum = false;
+uint8_t darkSpectrum = 0b0;            // each bit refers to a dark spectrum recorded for 
+                                       // the integration time specified by that bit index
+                                       // So for the default values, it should end up being
+                                       // 0b00100001
 
 boolean configParamsChanged = false;
 
@@ -225,16 +230,22 @@ void setup(){
      configParamsChanged = true;
     }
   }
+
+  //Open the logfile - if this is the first time, then add a header line
+  logFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
+  if(logFile.size() < 5){
+    logFile.println("Date\tTime\t3.7V Battery\t48V Battery\tCharging\tErrors");  
+  }
   
-  //open log file
-  logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
-  logFile.println(dateStr);
-  logFile.print("Li Battery = ");
-  logFile.println(bv37Analog);
-  logFile.print("Main Battery = ");
-  logFile.println(bv48Analog);
-  logFile.print("Charge Status = ");
-  logFile.println(digitalRead(batteryChargerStatus));
+  //print some status information
+  logFile.print(dateStr);  //Measurement date and time
+  logFile.print('\t');
+  logFile.print(bv37Analog);  //3.7 battery voltage
+  logFile.print('\t');
+  logFile.print(bv48Analog);  //48 battery voltage
+  logFile.print('\t');
+  logFile.print(digitalRead(batteryChargerStatus));  //if the 3.7v battery is charging
+  logFile.print('\t');
   logFile.flush();
   
   //set the file name to the current date
@@ -344,9 +355,27 @@ initializeError:
 
 void loop(){
 
+  recordingDarkSpectrum = false;
+  //If we don't need to change the integration time, then we already
+  //must have the dark spectrum as well, so skip ahead
   if(currentIntegrationTime == ledIntegrationTime[loopIteration]){
     goto doneSettingIntegration;
   }
+  
+  //check if the darkSpectrum bit has been set for this iteration
+  if(!(1<<(loopIteration) & darkSpectrum)){
+      recordingDarkSpectrum = true;  
+  }
+
+  for(uint8_t i = loopIteration; i < 7; i++){
+   if(ledIntegrationTime[loopIteration] == ledIntegrationTime[i]){
+    darkSpectrum = darkSpectrum | 1<<i;
+    logFile.print(darkSpectrum, BIN);
+    logFile.print(" ");
+   }
+  }
+  logFile.print('\t');
+  logFile.flush();
    
   //Convert binary value into ASCII characters
   dataBuffer[0] = ledIntegrationTime[loopIteration]/10000;
@@ -391,7 +420,12 @@ void loop(){
   delay(100);
   
 doneSettingIntegration:
-  dataFile.print(LED_NAMES[loopIteration]);
+
+  if(recordingDarkSpectrum){
+    dataFile.print("Dark ");
+  }else{
+    dataFile.print(LED_NAMES[loopIteration]);
+  }
   dataFile.write(' ');
   dataFile.print(dateStr);  
   dataFile.write(' ');
@@ -405,7 +439,9 @@ doneSettingIntegration:
     goto endloop;
   }
   
-  if(loopIteration < 5){
+  if(recordingDarkSpectrum){
+    //do nothing
+  }else if(loopIteration < 5 ){
     tlc5916.disableOutput();
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
@@ -473,8 +509,11 @@ doneSettingIntegration:
   dataFile.println("");
   dataFile.flush();  //make sure all the data was written to the SD card
   
-  loopIteration++;
-  if(loopIteration == 6){
+  if(!recordingDarkSpectrum){
+    loopIteration++;
+  }
+  
+  if(loopIteration == 7){
     dataFile.close();
     
     logFile.print("Charge Status = ");
