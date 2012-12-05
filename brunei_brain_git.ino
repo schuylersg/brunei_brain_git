@@ -86,12 +86,11 @@ uint16_t BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
 uint16_t PIXEL_TRANSFER_SPACING = 10;
 uint16_t currentIntegrationTime = 0;
 
-//index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916 (except for last two)
-char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL", "Turbid"};  
-uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10, CG_10};
-uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 50, 50};  // array for initial integration times for each LED
-                                                                          // the last one is for absorbance source
-uint16_t darkSpectrum [] = {0, 0, 0, 0, 0, 0, 0};                         //max is 14 (7 measuments plus 7 dark spectrum
+//index of LED_NAMES + 1 is the bit address of that LED on the TLC_5916
+char* const LED_NAMES [] ={"LED365", "LED430", "LED405", "LED390", "LED370", "AbsALL"};  
+uint8_t const LED_CURRENT_GAIN [] = {CG_20, CG_30, CG_30, CG_100, CG_30, CG_10};
+uint16_t ledIntegrationTime [] = {1000, 1000, 1000, 1000, 1000, 1000};  //array for initial integration times for each LED
+                                                                        //the last one is for absorbance source
 
 boolean configParamsChanged = false;
 
@@ -103,23 +102,17 @@ char dataFileName[ ] = "files/MM_DD_YY.txt";	//a character array for the file na
 File dataFile;
 File logFile;
 
-//State variables
-uint8_t openTries = 0;  
-uint8_t usb4000Tries = 0;
-uint8_t fileOpenError = 0;
-boolean measuringDarkSpectrum = false;
-uint8_t numDarkSpectrum = 0;
-uint16_t bv37Analog;
-uint16_t bv48Analog;
-
 //helper variables
 int bytesRead;
 char dataBuffer[8];
 int incomingByte;
 char data = 0;
+uint8_t openTries = 0;  
+uint8_t usb4000Tries = 0;
 uint8_t startLoc = 0;
-int i;
 
+uint16_t bv37Analog;
+uint16_t bv48Analog;
 
 /*************************************************************************
 Setup() runs once on startup. It does the foloowing:
@@ -215,18 +208,17 @@ void setup(){
         dataLogMinutes = (uint16_t)dataFile.parseInt();
       }else if (data == 'H'){
         dataLogHours = (uint16_t)dataFile.parseInt();
-      }else if(data >= 'a' && data <= 'g'){
+      }else if(data >= 'a' && data <= 'f'){
         ledIntegrationTime[data - 'a'] = (uint16_t) dataFile.parseInt();  
       }
     }
     dataFile.close();
   }else{
-    Blink(PURPLE, 300, 1);
-    fileOpenError = 1;
+    Blink(PURPLE, 300, 1); 
   }
   
   //error check to make sure integration times are in correct range
-  for(i = 0; i<7; i++){
+  for(int i = 0; i<6; i++){
     int j = constrain(ledIntegrationTime[i], MIN_INTEGRATION_TIME, MAX_INTEGRATION_TIME);
     if(j != ledIntegrationTime[i]){
      ledIntegrationTime[i] = j;
@@ -235,25 +227,14 @@ void setup(){
   }
   
   //open log file
-  //If it doesn't exist, add a top line of header
-  if(!SD.exists("LOGFILE.TXT")){
-    logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
-    logFile.println("Date\t3.7V\t48V\tCharger\tErrors");
-  }else{
-    logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
-  }
-  logFile.print(dateStr);
-  logFile.print('\t');
-  logFile.print(bv37Analog);
-  logFile.print('\t');
-  logFile.print(bv48Analog);
-  logFile.print('\t');
+  logFile = SD.open("LOGFILE.TXT", FILE_WRITE);
+  logFile.println(dateStr);
+  logFile.print("Li Battery = ");
+  logFile.println(bv37Analog);
+  logFile.print("Main Battery = ");
+  logFile.println(bv48Analog);
+  logFile.print("Charge Status = ");
   logFile.println(digitalRead(batteryChargerStatus));
-  
-  if(fileOpenError){
-     logFile.print("Config Not Read\t");
-  }
-  logFile.print("hello");
   logFile.flush();
   
   //set the file name to the current date
@@ -280,21 +261,15 @@ void setup(){
     errorValue = FILE_FAIL;
     goto initializeError;
   }
-
-  logFile.print("FO\t");
-  logFile.flush();
   
   pinMode(rtcAlarm, INPUT);            //Interrupt pin for RTC alarm
   
   //Start the TLLC5916 LED driver with pins 4 and 5 controlling the SPI communications
   tlc5916.begin(ledOutputEnable,ledLatchEnable);
   
-  logFile.print("LB\t");
-  logFile.flush();
-  
   delay(500);
   //Wait for spectrometer to finish initializing
-  //If everything goes well, green LED will blink times
+  //If everything goes well, green LED will blink 6 times
   Blink(GREEN, 500, 5);
   
   usb4000Tries = 0;
@@ -413,28 +388,10 @@ void loop(){
   }
   
   currentIntegrationTime = ledIntegrationTime[loopIteration];
-  
-  //check if we need to take a new dark spectrum
-  measuringDarkSpectrum = true;
-  for(i=0; i < numDarkSpectrum; i++){
-    if(darkSpectrum[i] == currentIntegrationTime){
-      measuringDarkSpectrum = false;
-      break;  //leave for loop because we've already taken a dark spectrum for current integration time
-    }
-  }
-  if(measuringDarkSpectrum){  
-    darkSpectrum[numDarkSpectrum] = currentIntegrationTime;
-    numDarkSpectrum++;
-  }  
-  
   delay(100);
   
 doneSettingIntegration:
-  if(measuringDarkSpectrum){
-    dataFile.print("DARK");
-  }else{
-    dataFile.print(LED_NAMES[loopIteration]);
-  }
+  dataFile.print(LED_NAMES[loopIteration]);
   dataFile.write(' ');
   dataFile.print(dateStr);  
   dataFile.write(' ');
@@ -448,21 +405,14 @@ doneSettingIntegration:
     goto endloop;
   }
   
-  if(measuringDarkSpectrum){
-    //Do nothing
-  } else if(loopIteration < 5){
+  if(loopIteration < 5){
     tlc5916.disableOutput();
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
     tlc5916.enableOutput();
-  }else if(loopIteration == 5){
+  }else{
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
     delay(LAMP_WARM_UP_TIME); // give time to warm up
-  }else{
-    tlc5916.disableOutput();
-    tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
-    tlc5916.ezSetPinsOnOff(0b00011111);  //Turn on all the LEDs
-    tlc5916.enableOutput();
   }
     
   //Start the scan
@@ -523,15 +473,12 @@ doneSettingIntegration:
   dataFile.println("");
   dataFile.flush();  //make sure all the data was written to the SD card
   
-  if(!measuringDarkSpectrum){
-    loopIteration++;
-  }
-  if(loopIteration == 7){
+  loopIteration++;
+  if(loopIteration == 6){
     dataFile.close();
     
     logFile.print("Charge Status = ");
-    logFile.print(digitalRead(batteryChargerStatus));
-    logFile.println("");
+    logFile.println(digitalRead(batteryChargerStatus));
     logFile.close();
     
     dataLogSeconds = dataLogSeconds + 10;
@@ -570,7 +517,7 @@ void writeConfigFile(){
   dataFile.println(PIXEL_TRANSFER_SPACING);
   dataFile.print("B=");
   dataFile.println(BOXCAR_WIDTH);
-  for(i = 0; i < 6; i ++){
+  for(int i = 0; i < 6; i ++){
     dataFile.print((char)('a' + i));
     dataFile.print('=');
     dataFile.println(ledIntegrationTime[i]);    
@@ -714,9 +661,8 @@ boolean asciiACKRead(uint8_t mode){
   return false;
 }
 
-//Blink the LEDs
 void Blink (uint8_t color, int timing, int blinks){
-  for(int b = 0 ; b < blinks; b++){
+  for(int i = 0 ; i< blinks; i++){
     digitalWrite(rgbLEDs[0], bitRead(color, 0));
     digitalWrite(rgbLEDs[1], bitRead(color, 1));
     digitalWrite(rgbLEDs[2], bitRead(color, 2));
@@ -727,4 +673,3 @@ void Blink (uint8_t color, int timing, int blinks){
     delay(timing);
   }
 }
-
