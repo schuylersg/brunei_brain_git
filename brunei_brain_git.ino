@@ -356,7 +356,6 @@ initializeError:
 }
 
 void loop(){
-  
   recordingDarkSpectrum = false;
   //If we don't need to change the integration time, then we already
   //must have the dark spectrum as well, so skip ahead
@@ -387,9 +386,22 @@ void loop(){
   startLoc = 0;
   while(dataBuffer[startLoc] == 0){
     startLoc++;
+  }
+
+  if(loopErrors>0){
+   dataFile.print("DB=");
+   dataFile.print(dataBuffer[0]);
+   dataFile.print(dataBuffer[1]);
+   dataFile.print(dataBuffer[2]);
+   dataFile.print(dataBuffer[3]);
+   dataFile.print(dataBuffer[4]);
+   dataFile.print(" ");
+   dataFile.println(startLoc);
+   dataFile.flush();
   }  
   
   //Set the spectrometer integration time
+  clearSerial(); //somehow sometimes we end up with stray bits
   Serial.write('I');
   Serial.flush();
   delay(10);
@@ -412,6 +424,7 @@ void loop(){
     errorValue = USB4000_ERROR_1;
     Blink(errorValue & 0b00000111, 500, errorValue >> 3);
     loopErrors++;
+    clearSerial();
     goto endloop;  
   }
   
@@ -540,6 +553,10 @@ endloop:
     dataFile.close();
     writeConfigFile();
     digitalWrite(selfReset, HIGH);
+  }
+  
+  if(loopErrors > 0 && recordingDarkSpectrum){ 
+    darkSpectrum &= ~(1<<loopIteration);
   }
   digitalWrite(greenLED, LOW);    
 }
@@ -686,7 +703,7 @@ boolean asciiACKRead(uint8_t mode){
   if(mode == NO_CRLF)
     expectedNumBytes = 5;
  
-  Serial.setTimeout(100);  //set the timeout to something reasonable
+  Serial.setTimeout(300);  //set the timeout to something reasonable
   numBytesRead = Serial.readBytes(bytes, expectedNumBytes);
   if(numBytesRead != expectedNumBytes)
     return false;
