@@ -105,7 +105,6 @@ RTCDateTime alarmTime;    //global variable to store the current alarm time
 char dateStr[ ] = "00/00/00 00:00:00";          //a character array for printing date/time
 char dataFileName[ ] = "files/MM_DD_YY.txt";	//a character array for the file name
 File dataFile;
-File logFile;
 
 //helper variables
 int bytesRead;
@@ -213,8 +212,10 @@ void setup(){
         dataLogMinutes = (uint16_t)dataFile.parseInt();
       }else if (data == 'H'){
         dataLogHours = (uint16_t)dataFile.parseInt();
-      }else if(data >= 'a' && data <= 'f'){
+      }else if(data >= 'a' && data <= 'g'){
         ledIntegrationTime[data - 'a'] = (uint16_t) dataFile.parseInt();  
+      }else if(data == '*'){
+        break;
       }
     }
     dataFile.close();
@@ -223,7 +224,7 @@ void setup(){
   }
   
   //error check to make sure integration times are in correct range
-  for(int i = 0; i<6; i++){
+  for(int i = 0; i<7; i++){
     int j = constrain(ledIntegrationTime[i], MIN_INTEGRATION_TIME, MAX_INTEGRATION_TIME);
     if(j != ledIntegrationTime[i]){
      ledIntegrationTime[i] = j;
@@ -232,21 +233,22 @@ void setup(){
   }
 
   //Open the logfile - if this is the first time, then add a header line
-  logFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
-  if(logFile.size() < 5){
-    logFile.println("Date\tTime\t3.7V Battery\t48V Battery\tCharging\tErrors");  
-  }
+  dataFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
+ //if(logFile.size() < 5){
+ //   dataFile.println("Date\tTime\t3.7V Battery\t48V Battery\tCharging\tErrors");  
+ // }
   
   //print some status information
-  logFile.print(dateStr);  //Measurement date and time
-  logFile.print('\t');
-  logFile.print(bv37Analog);  //3.7 battery voltage
-  logFile.print('\t');
-  logFile.print(bv48Analog);  //48 battery voltage
-  logFile.print('\t');
-  logFile.print(digitalRead(batteryChargerStatus));  //if the 3.7v battery is charging
-  logFile.print('\t');
-  logFile.flush();
+  dataFile.println("");
+  dataFile.print(dateStr);  //Measurement date and time
+  dataFile.print('\t');
+  dataFile.print(bv37Analog);  //3.7 battery voltage
+  dataFile.print('\t');
+  dataFile.print(bv48Analog);  //48 battery voltage
+  dataFile.print('\t');
+  dataFile.print(digitalRead(batteryChargerStatus));  //if the 3.7v battery is charging
+  dataFile.print('\t');
+  dataFile.close();
   
   //set the file name to the current date
   dataFileName [6] = currentTime.months/10 + '0';
@@ -354,7 +356,7 @@ initializeError:
 }
 
 void loop(){
-
+  
   recordingDarkSpectrum = false;
   //If we don't need to change the integration time, then we already
   //must have the dark spectrum as well, so skip ahead
@@ -367,15 +369,12 @@ void loop(){
       recordingDarkSpectrum = true;  
   }
 
+  //Go through and set the flag for all other scans with the same integration time
   for(uint8_t i = loopIteration; i < 7; i++){
    if(ledIntegrationTime[loopIteration] == ledIntegrationTime[i]){
     darkSpectrum = darkSpectrum | 1<<i;
-    logFile.print(darkSpectrum, BIN);
-    logFile.print(" ");
    }
   }
-  logFile.print('\t');
-  logFile.flush();
    
   //Convert binary value into ASCII characters
   dataBuffer[0] = ledIntegrationTime[loopIteration]/10000;
@@ -513,14 +512,14 @@ doneSettingIntegration:
     loopIteration++;
   }
   
-  if(loopIteration == 7){
+  if(loopIteration >= 7){
     dataFile.close();
     
-    logFile.print("Charge Status = ");
-    logFile.println(digitalRead(batteryChargerStatus));
-    logFile.close();
+//    logFile.print("Charge Status = ");
+//    logFile.println(digitalRead(batteryChargerStatus));
+//    logFile.close();
     
-    dataLogSeconds = dataLogSeconds + 10;
+    dataLogSeconds = dataLogSeconds;
     configParamsChanged = true;
     writeConfigFile();                  //update the config file with any changes
     Blink(WHITE, 100, 3);           
@@ -556,7 +555,7 @@ void writeConfigFile(){
   dataFile.println(PIXEL_TRANSFER_SPACING);
   dataFile.print("B=");
   dataFile.println(BOXCAR_WIDTH);
-  for(int i = 0; i < 6; i ++){
+  for(int i = 0; i < 7; i ++){
     dataFile.print((char)('a' + i));
     dataFile.print('=');
     dataFile.println(ledIntegrationTime[i]);    
