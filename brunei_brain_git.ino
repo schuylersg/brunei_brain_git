@@ -388,32 +388,21 @@ void loop(){
     startLoc++;
   }
 
-  if(loopErrors>0){
-   dataFile.print("DB=");
-   dataFile.print(dataBuffer[0]);
-   dataFile.print(dataBuffer[1]);
-   dataFile.print(dataBuffer[2]);
-   dataFile.print(dataBuffer[3]);
-   dataFile.print(dataBuffer[4]);
-   dataFile.print(" ");
-   dataFile.println(startLoc);
-   dataFile.flush();
-  }  
-  
   //Set the spectrometer integration time
-  clearSerial(); //somehow sometimes we end up with stray bits
   Serial.write('I');
   Serial.flush();
   delay(10);
+  
   Serial.read();
 
   while(startLoc<5){
     Serial.write(dataBuffer[startLoc] + '0');
     Serial.flush(); 
     delay(10);
-    Serial.read();  //read the echoed character
+    Serial.read();//read the echoed character
     startLoc++;
   }
+  dataFile.flush();
   
   Serial.write(13);
   Serial.flush();
@@ -434,14 +423,12 @@ void loop(){
 doneSettingIntegration:
 
   if(recordingDarkSpectrum){
-    dataFile.print("Dark ");
+    dataFile.print("Dark  ");
   }else{
     dataFile.print(LED_NAMES[loopIteration]);
   }
   dataFile.write(' ');
-  dataFile.print(dateStr);  
-  dataFile.write(' ');
-  dataFile.flush();
+  dataFile.print(dateStr);
   
   //Check that the USB4000 is ready to take a scan
   if(!USB4000Ready()){
@@ -458,6 +445,7 @@ doneSettingIntegration:
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
     tlc5916.enableOutput();
+    dataFile.flush();
   }else{
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
     delay(LAMP_WARM_UP_TIME); // give time to warm up
@@ -494,7 +482,7 @@ doneSettingIntegration:
   digitalWrite(specTrigger, LOW);
   
   //wait here until spectrum begins transmitting - will timeout if nothing received
-  bytesRead = Serial.readBytes(dataBuffer, 1);
+  bytesRead = Serial.readBytes(dataBuffer, 5);
   
   //Gets here once the USB4000 starts transmitting data
   tlc5916.disableOutput();  //turn off LED once scan has been captured
@@ -507,9 +495,9 @@ doneSettingIntegration:
     loopErrors++;
     goto endloop;
   }
-
+  
   Serial.setTimeout(20);    //set the serial timeout to 20ms (probably can be shorter)
-  do{
+  while(Serial.readBytes(dataBuffer, 1)){
    digitalWrite(greenLED, HIGH);
    if(dataBuffer[0] == 13 || dataBuffer[0] == '>' || dataBuffer[0] == 10){
       //do nothing 
@@ -517,7 +505,7 @@ doneSettingIntegration:
      dataFile.write(dataBuffer[0]);
    }
    digitalWrite(greenLED, LOW);
-  }while(Serial.readBytes(dataBuffer, 1));
+  }
   dataFile.println("");
   dataFile.flush();  //make sure all the data was written to the SD card
   
@@ -703,10 +691,11 @@ boolean asciiACKRead(uint8_t mode){
   if(mode == NO_CRLF)
     expectedNumBytes = 5;
  
-  Serial.setTimeout(300);  //set the timeout to something reasonable
+  Serial.setTimeout(1000);  //I found that 300ms was not enough. 1000ms seems to be enough
   numBytesRead = Serial.readBytes(bytes, expectedNumBytes);
-  if(numBytesRead != expectedNumBytes)
+  if(numBytesRead != expectedNumBytes){
     return false;
+  }
 
   if(mode == WITH_CRLF && bytes[2] == ACK)
     return true;
