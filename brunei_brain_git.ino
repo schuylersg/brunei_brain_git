@@ -134,6 +134,7 @@ void setup(){
   
   //Initialize pins
   pinMode(fiveVoltEnable, OUTPUT);
+  pinMode(twelveVoltEnable, OUTPUT);
   pinMode(selfReset, OUTPUT);
   digitalWrite(selfReset, LOW);
   pinMode(specTrigger, OUTPUT);
@@ -446,11 +447,18 @@ doneSettingIntegration:
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
     tlc5916.enableOutput();
     dataFile.flush();
-  }else{
+  }else if(loopIteration ==5){    //Absorbance measurement
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
     delay(LAMP_WARM_UP_TIME); // give time to warm up
+  }else{  //turbidity measurement
+    tlc5916.disableOutput();
+    tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
+    tlc5916.ezSetPinsOnOff(0b00011111);    //turn on all LEDs
+    tlc5916.enableOutput();
+    dataFile.flush();
   }
-    
+  
+  digitalWrite(blueLED, HIGH);
   //Start the scan
   Serial.write('S');
   Serial.flush();
@@ -460,7 +468,7 @@ doneSettingIntegration:
   //The second value is etx or stx
   dataBuffer[0] = 0;
   dataBuffer[1] = 3;
-  bytesRead = Serial.readBytes(dataBuffer, 2); 
+  bytesRead = Serial.readBytes(dataBuffer, 2);
 
   if(dataBuffer[0] != 'S' || dataBuffer[1] == 3){  //error with Spec
     tlc5916.disableOutput();  //turn off LED
@@ -487,6 +495,7 @@ doneSettingIntegration:
   //Gets here once the USB4000 starts transmitting data
   tlc5916.disableOutput();  //turn off LED once scan has been captured
   digitalWrite(twelveVoltEnable, LOW); //turn off absorbance source
+  digitalWrite(blueLED, LOW);
   
   if(bytesRead == 0){ //the read operation timedout so there must have been an error
     errorValue = USB4000_ERROR_4;
