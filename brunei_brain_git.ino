@@ -18,7 +18,6 @@ const unsigned int BATTERY48_WARNING_LEVEL = 570;         // Set to 43 volts - b
 const uint16_t MAX_INTEGRATION_TIME = 10000;              // The maximum allowed USB4000 integration time
 const uint16_t MIN_INTEGRATION_TIME = 10;                 // The minimum allowed USB4000 integration time
 const uint8_t MAX_LOOP_ERRORS = 5;                        // The number of errors in loop() before power cycling
-const uint16_t LAMP_WARM_UP_TIME = 1000;                  // Lamp warm up time in milliseconds
 const uint8_t MINIMUM_ALARM_SECCONDS = 5;                 // The minimum time the alarm can be set for in seconds
 
 const byte ACK = 6;      //ASCII ack used by USB4000
@@ -80,6 +79,10 @@ uint8_t errorValue = 0;          // holds an error value between 1 and 31, and a
 uint8_t dataLogSeconds = 15;
 uint8_t dataLogMinutes = 0;
 uint8_t dataLogHours = 0;
+
+uint16_t lampWarmUpTime = 1000;  // Lamp warm up time in milliseconds
+uint16_t ledWarmUpTime = 100;   // LED warm up/stabilization time in milliseconds
+boolean waitForFullCharge = false;   // if this is true, then the sensor will stay on until the 3.7v battery completes charging 
             
 //USB4000 settings
 uint16_t BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
@@ -203,20 +206,24 @@ void setup(){
     Blink(GREEN, 300, 1);    //2nd green blink
     while(dataFile.available()){
       data = dataFile.read();
-      if (data == 'P'){
-        PIXEL_TRANSFER_SPACING = (uint16_t) dataFile.parseInt();
-      }else if (data == 'B'){
+      if (data == 'B'){
         BOXCAR_WIDTH = (uint16_t)dataFile.parseInt();
-      }else if (data == 'S'){
-        dataLogSeconds = (uint16_t)dataFile.parseInt();
-      }else if (data == 'M'){
-        dataLogMinutes = (uint16_t)dataFile.parseInt();
+      }else if (data == 'C'){
+        waitForFullCharge = (dataFile.parseInt() != 0);
       }else if (data == 'H'){
         dataLogHours = (uint16_t)dataFile.parseInt();
+      }else if (data=='L'){
+        ledWarmUpTime = (uint16_t)dataFile.parseInt(); 
+      }else if (data == 'M'){
+        dataLogMinutes = (uint16_t)dataFile.parseInt();
+      }else if (data == 'P'){
+        PIXEL_TRANSFER_SPACING = (uint16_t)dataFile.parseInt();
+      }else if (data == 'S'){
+        dataLogSeconds = (uint16_t)dataFile.parseInt();
+      }else if (data =='W'){
+        lampWarmUpTime = (uint16_t)dataFile.parseInt();
       }else if(data >= 'a' && data <= 'g'){
         ledIntegrationTime[data - 'a'] = (uint16_t) dataFile.parseInt();  
-      }else if(data == '*'){
-        break;
       }
     }
     dataFile.close();
@@ -438,6 +445,9 @@ doneSettingIntegration:
     goto endloop;
   }
   
+  
+  digitalWrite(blueLED, HIGH);  //turn on blue LED to let user know that integration taking place
+  
   if(recordingDarkSpectrum){
     //do nothing
   }else if(loopIteration < 5 ){
@@ -446,9 +456,10 @@ doneSettingIntegration:
     tlc5916.ezSetPinsOnOff(1 << loopIteration);
     tlc5916.enableOutput();
     dataFile.flush();
-  }else if(loopIteration ==5){    //Absorbance measurement
+    delay(ledWarmUpTime);
+  }else if(loopIteration == 5){    //Absorbance measurement
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
-    delay(LAMP_WARM_UP_TIME); // give time to warm up
+    delay(lampWarmUpTime); // give time to warm up
   }else{  //turbidity measurement
     tlc5916.disableOutput();
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
@@ -457,7 +468,6 @@ doneSettingIntegration:
     dataFile.flush();
   }
   
-  digitalWrite(blueLED, HIGH);
   //Start the scan
   Serial.write('S');
   Serial.flush();
@@ -522,22 +532,22 @@ doneSettingIntegration:
   }
   
   if(loopIteration >= 7){
+    while(waitForFullCharge && !digitalRead(batteryChargerStatus)){ //if set, wait here until battery is charged
+      digitalWrite(blueLED, !digitalRead(blueLED));
+    };
     dataFile.close();
-    
-//    logFile.print("Charge Status = ");
-//    logFile.println(digitalRead(batteryChargerStatus));
-//    logFile.close();
-    
-    dataLogSeconds = dataLogSeconds;
-    configParamsChanged = true;
+    dataFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
+    dataFile.print("C:");
+    digitalRead(batteryChargerStatus)?dataFile.print("No\t"):dataFile.print("Yes\t"); //if the 3.7v battery is charging 
+    dataFile.close();
     writeConfigFile();                  //update the config file with any changes
     Blink(WHITE, 100, 3);           
     RTC.clearAlarmFlags();              //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
-    setRTCAlarm(dataLogSeconds, dataLogMinutes, dataLogHours);              //set the alarm for 20 minutes from now
-    digitalWrite(fiveVoltEnable, LOW);
-    sleepNow();
-    digitalWrite(fiveVoltEnable, HIGH);
+    setRTCAlarm(dataLogSeconds, dataLogMinutes, dataLogHours);              //set the alarm for some time from now
+    digitalWrite(fiveVoltEnable, LOW);      //turn off the five volt dc-dc converter - now we are operating from the 3.7v battery
+    sleepNow();    //go to sleep
+    digitalWrite(fiveVoltEnable, HIGH);     //if we get here, then we just woke up - we need the 5V line to do the reset
     delay(10);
     digitalWrite(selfReset, HIGH);    //After wake up, reset the arduino
   }
@@ -569,21 +579,28 @@ void writeConfigFile(){
   
   SD.remove("config.txt");  //remove the current config file
   dataFile = SD.open("config.txt", FILE_WRITE);
-  dataFile.print("P=");
-  dataFile.println(PIXEL_TRANSFER_SPACING);
   dataFile.print("B=");
   dataFile.println(BOXCAR_WIDTH);
+  dataFile.print("C=");
+  dataFile.println(waitForFullCharge);
+  dataFile.print("H=");
+  dataFile.println(dataLogHours);
+  dataFile.print("L=");
+  dataFile.println(ledWarmUpTime);
+  dataFile.print("M=");
+  dataFile.println(dataLogMinutes);
+  dataFile.print("P=");
+  dataFile.println(PIXEL_TRANSFER_SPACING);
+  dataFile.print("S=");
+  dataFile.println(dataLogSeconds);
+  dataFile.print("W=");
+  dataFile.println(lampWarmUpTime);  
+  
   for(int i = 0; i < 7; i ++){
     dataFile.print((char)('a' + i));
     dataFile.print('=');
     dataFile.println(ledIntegrationTime[i]);    
   }
-  dataFile.print("S=");
-  dataFile.println(dataLogSeconds);
-  dataFile.print("M=");
-  dataFile.println(dataLogMinutes);
-  dataFile.print("H=");
-  dataFile.println(dataLogHours);
   dataFile.close();
 }
 
