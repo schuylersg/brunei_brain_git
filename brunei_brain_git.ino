@@ -221,7 +221,7 @@ void setup(){
     }
     dataFile.close();
   }else{
-    Blink(PURPLE, 300, 1); 
+    Blink(PURPLE, 300, 3); 
   }
   
   //error check to make sure integration times are in correct range
@@ -235,20 +235,19 @@ void setup(){
 
   //Open the logfile - if this is the first time, then add a header line
   dataFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
- //if(logFile.size() < 5){
- //   dataFile.println("Date\tTime\t3.7V Battery\t48V Battery\tCharging\tErrors");  
- // }
+  if(dataFile.size() < 5){
+    dataFile.print("Date\tTime\t3.7V Battery\t48V Battery\tCharging\tErrors");  
+  }
   
   //print some status information
   dataFile.println("");
   dataFile.print(dateStr);  //Measurement date and time
   dataFile.print('\t');
-  dataFile.print(bv37Analog);  //3.7 battery voltage
+  dataFile.print(((float)bv37Analog)*0.00466);  //3.7 battery voltage = bv37Analog/1023*1.1*(325/75)
   dataFile.print('\t');
-  dataFile.print(bv48Analog);  //48 battery voltage
+  dataFile.print(((float)bv48Analog)*0.0536);  //48 battery voltage = bv48Analog/1023*1.1*(4990/100)
   dataFile.print('\t');
-  dataFile.print(digitalRead(batteryChargerStatus));  //if the 3.7v battery is charging
-  dataFile.print('\t');
+  digitalRead(batteryChargerStatus)?dataFile.print("No\t"):dataFile.print("Yes\t"); //if the 3.7v battery is charging 
   dataFile.close();
   
   //set the file name to the current date
@@ -547,6 +546,11 @@ doneSettingIntegration:
 endloop:
   //If there have been repeated loop errors, we will try to restart
   if(loopErrors >= MAX_LOOP_ERRORS){
+    dataFile.close();
+    //Open the logfile - if this is the first time, then add a header line
+    dataFile = SD.open("LOGFILE.TXT", FILE_WRITE);  
+    dataFile.print("E:");
+    dataFile.print(errorValue, BIN);
     dataFile.close();
     writeConfigFile();
     digitalWrite(selfReset, HIGH);
