@@ -1,0 +1,21 @@
+Brunei Brain Correct Start-Up Sequence:
+
+Initial LED test
+Red
+Green
+Blue
+Yellow
+Teal
+Purple
+White
+
+1 Green - SD card initialized
+2 Green - Config File opened /(FAILURE = Purple)
+3 Blue USB4000 waiting
+4 Blue USB4000 waiting
+5 Blue USB4000 waiting
+6 Blue USB4000 waiting
+7 Blue USB4000 waiting
+8 Blue USB4000 waiting
+9 Green DONE Initializing
+

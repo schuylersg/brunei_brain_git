@@ -5,7 +5,6 @@ To take a scan send
 This makes the USB4000 ready to be triggerd from the external signal
 Once it is triggered, it will integrate for the given time, and then return the data once it's done
 */
-
 #include <SPI.h>
 #include <SD.h>
 #include <RTC_DS3234.h>
@@ -27,13 +26,14 @@ const uint8_t WITH_CRLF = 1;
 const uint8_t NO_CRLF = 0;
 
 //Colors
-const uint8_t RED =     0b00000001;
-const uint8_t GREEN =   0b00000010;
-const uint8_t BLUE =    0b00000100;
-const uint8_t YELLOW =  0b00000011;
-const uint8_t TEAL =    0b00000110;
-const uint8_t PURPLE =  0b00000101;
-const uint8_t WHITE =   0b00000111;
+const uint8_t RED =     0b00000110;
+const uint8_t GREEN =   0b00000101;
+const uint8_t BLUE =    0b00000011;
+const uint8_t YELLOW =  0b00000100;
+const uint8_t TEAL =    0b00000001;
+const uint8_t PURPLE =  0b00000010;
+const uint8_t WHITE =   0b00000000;
+const uint8_t BLACK =   0b00000111;
 
 //Error values
 const uint8_t SD_FAIL = (1<<3) | RED;
@@ -43,28 +43,34 @@ const uint8_t BATTERY48_NOT_CONNECTED = (3<<3) | YELLOW;
 const uint8_t USB4000_ERROR_1 = (1<<3) | TEAL;
 const uint8_t USB4000_ERROR_2 = (2<<3) | TEAL;
 const uint8_t USB4000_ERROR_3 = (3<<3) | TEAL;
-const uint8_t USB4000_ERROR_4 = (4<<3) | BLUE;
+const uint8_t USB4000_ERROR_4 = (4<<3) | TEAL;
 const uint8_t USB4000_ERROR_5 = (5<<3) | TEAL;
 
 //PIN ASSIGNMENTS
 const uint8_t SpecRx = 0;
 const uint8_t SpecTx = 1;
-const uint8_t batteryChargerStatus = 2;
+const uint8_t ledLatchEnable = 2;
+// RTC Alarm and battery charger status are both pin 3
+// TODO the code must be change to handle this
+// This pin is pulled up to the Arduino Voltage
+// It is pulled down EITHER when the RTC Alarm goes off
+// or if the battery is charging
+const uint8_t batteryChargerStatus = 3;
 const uint8_t rtcAlarm = 3;
-const uint8_t ledLatchEnable = 4;
+const uint8_t specTrigger = 4;
 const uint8_t ledOutputEnable = 5;
 const uint8_t selfReset = 6;
-const uint8_t csSD = 8;
-const uint8_t csRTC = 9;
+const uint8_t redLED = 7;
+const uint8_t twelveVoltEnable = 8;
+const uint8_t fiveVoltEnable = 9;
 
-const uint8_t fiveVoltEnable = A0;
-const uint8_t twelveVoltEnable = A1;
+const uint8_t csSD = A0;
+const uint8_t csRTC = A1;
 
-const uint8_t specTrigger = 7;
-const uint8_t rgbLEDs [] = {7, A2, A3};
+const uint8_t rgbLEDs [] = {7, A3, A2};
 
-const byte greenLED = A2;
-const byte blueLED = A3;
+const byte greenLED = A3;
+const byte blueLED = A2;
 const byte batteryVoltage48 = A4;
 const byte batteryVoltage37 = A5;
 
@@ -86,6 +92,7 @@ boolean waitForFullCharge = false;   // if this is true, then the sensor will st
             
 //USB4000 settings
 uint16_t BOXCAR_WIDTH = 5;   //Values greater than 3 slow down transfer speeds
+                             //Slower transfer speeds are good so that the SD card can keep up
 uint16_t PIXEL_TRANSFER_SPACING = 10;
 uint16_t currentIntegrationTime = 0;
 
@@ -140,9 +147,14 @@ void setup(){
   pinMode(twelveVoltEnable, OUTPUT);
   pinMode(selfReset, OUTPUT);
   digitalWrite(selfReset, LOW);
+  
   pinMode(specTrigger, OUTPUT);
+  digitalWrite(specTrigger, LOW);
+  
   pinMode(greenLED, OUTPUT);
   pinMode(blueLED, OUTPUT);
+  pinMode(redLED, OUTPUT);
+  SetLEDColor(&BLACK);
   
   //read the battery voltages
   analogReference(INTERNAL);  //set the analog reference to the internal 1.1 volts
@@ -156,16 +168,19 @@ void setup(){
   analogRead(batteryVoltage48);
   delay(10);
   bv48Analog = analogRead(batteryVoltage48);
-  
+
+  //turn on the 5V DC-DC converter. This automatically turns on the USB4000
+  digitalWrite(fiveVoltEnable, HIGH); 
   
   //Cycle through colors
-  Blink(RED, 300, 1);
-  Blink(GREEN, 300, 1);
-  Blink(BLUE, 300, 1);
-  Blink(YELLOW, 300, 1);
-  Blink(TEAL, 300, 1);
-  Blink(PURPLE, 300, 1);
-  Blink(WHITE, 300, 1);
+  SetLEDColorWithDelay(&RED,     500);
+  SetLEDColorWithDelay(&YELLOW,  500);
+  SetLEDColorWithDelay(&GREEN,   500);
+  SetLEDColorWithDelay(&TEAL,    500);
+  SetLEDColorWithDelay(&BLUE,    500);
+  SetLEDColorWithDelay(&PURPLE,  500);
+  SetLEDColorWithDelay(&WHITE,   500);
+  SetLEDColorWithDelay(&BLACK,   500);
   
   //Initialize chip select control pinspins
   pinMode(10, OUTPUT);        //Arduino defined chip select  
@@ -174,9 +189,6 @@ void setup(){
   pinMode(csRTC, OUTPUT);     //Real time clock chip select
   digitalWrite(csRTC, HIGH);
   
-  //turn on the 5V DC-DC converter. This automatically turns on the USB4000
-  digitalWrite(fiveVoltEnable, HIGH); 
-  
   SPI.begin();  //start SPI communication
 
   //see if the SD card is present and can be initialized:
@@ -184,13 +196,16 @@ void setup(){
     errorValue = SD_FAIL;
     goto initializeError;
   }else{
-    Blink(GREEN, 300, 1);    //1st green blink
+    Blink(GREEN, 500, 1);    //1st green blink
   }
   
   RTC.begin(csRTC);                    //initialize RTC with chip select pin
   RTC.clearAlarmFlags();               //clear the alarm flags because we don't know what state the RTC was in
   currentTime = RTC.getRTCDateTime();  //need to do this initial read - otherwise strange bug occurs
                                        //where SD.open() fails the first time.
+  SetLEDColor(&WHITE);                    //strobe White
+  delay(100);
+  SetLEDColor(&BLACK);  
   dateTime2String(&currentTime);        //convert date and time to human readable string
                                        //which is stored in the variable dateStr
   
@@ -203,7 +218,7 @@ void setup(){
   }while(!dataFile && openTries < 4);
 
   if(dataFile){
-    Blink(GREEN, 300, 1);    //2nd green blink
+    Blink(GREEN, 500, 1);    //2nd green blink
     while(dataFile.available()){
       data = dataFile.read();
       if (data == 'B'){
@@ -228,7 +243,7 @@ void setup(){
     }
     dataFile.close();
   }else{
-    Blink(PURPLE, 300, 3); 
+    Blink(PURPLE, 300, 3);  //Let user know that the config file wasn't read 
   }
   
   //error check to make sure integration times are in correct range
@@ -290,15 +305,15 @@ void setup(){
   delay(500);
   //Wait for spectrometer to finish initializing
   //If everything goes well, green LED will blink 6 times
-  Blink(GREEN, 500, 5);
+  Blink(BLUE, 500, 5); 
   
   usb4000Tries = 0;
   do{
-    Blink(GREEN, 500<<usb4000Tries, 1);
+    Blink(BLUE, 500<<usb4000Tries, 1);
     clearSerial();
     Serial.write(' ');
     Serial.flush();
-    delay(10);
+    delay(50);
     incomingByte = Serial.read();
     usb4000Tries++;
   }while(incomingByte != NAK && usb4000Tries < 4);
@@ -326,7 +341,7 @@ void setup(){
   Serial.write(highByte(PIXEL_TRANSFER_SPACING));
   Serial.write(lowByte(PIXEL_TRANSFER_SPACING));
   Serial.flush();
-  delay(10);
+  delay(100);
   if(Serial.read() != ACK){
     errorValue = USB4000_ERROR_2;
     goto initializeError;   
@@ -337,7 +352,7 @@ void setup(){
   Serial.write(0);
   Serial.write(3);
   Serial.flush();
-  delay(10);
+  delay(100);
   if(Serial.read() != ACK){
     errorValue = USB4000_ERROR_3;
     goto initializeError;   
@@ -445,9 +460,10 @@ doneSettingIntegration:
     goto endloop;
   }
   
-  
-  digitalWrite(blueLED, HIGH);  //turn on blue LED to let user know that integration taking place
-  
+  //Turn on blue LED to let user know that integration taking place
+  SetLEDColor(&BLUE);
+
+  //Turn on Excitation Source   
   if(recordingDarkSpectrum){
     //do nothing
   }else if(loopIteration < 5 ){
@@ -457,9 +473,9 @@ doneSettingIntegration:
     tlc5916.enableOutput();
     dataFile.flush();
     delay(ledWarmUpTime);
-  }else if(loopIteration == 5){    //Absorbance measurement
+  }else if(loopIteration == 5){            //Absorbance measurement
     digitalWrite(twelveVoltEnable, HIGH);  //turn on lamp
-    delay(lampWarmUpTime); // give time to warm up
+    delay(lampWarmUpTime);                 // give time to warm up
   }else{  //turbidity measurement
     tlc5916.disableOutput();
     tlc5916.ezSetCurrentConfigurationCode(LED_CURRENT_GAIN[loopIteration]);
@@ -504,7 +520,7 @@ doneSettingIntegration:
   //Gets here once the USB4000 starts transmitting data
   tlc5916.disableOutput();  //turn off LED once scan has been captured
   digitalWrite(twelveVoltEnable, LOW); //turn off absorbance source
-  digitalWrite(blueLED, LOW);
+  SetLEDColor(&BLACK);
   
   if(bytesRead == 0){ //the read operation timedout so there must have been an error
     errorValue = USB4000_ERROR_4;
@@ -516,13 +532,13 @@ doneSettingIntegration:
   
   Serial.setTimeout(20);    //set the serial timeout to 20ms (probably can be shorter)
   while(Serial.readBytes(dataBuffer, 1)){
-   digitalWrite(greenLED, HIGH);
+   digitalWrite(greenLED, LOW);
    if(dataBuffer[0] == 13 || dataBuffer[0] == '>' || dataBuffer[0] == 10){
       //do nothing 
    }else{
      dataFile.write(dataBuffer[0]);
    }
-   digitalWrite(greenLED, LOW);
+   digitalWrite(greenLED, HIGH);
   }
   dataFile.println("");
   dataFile.flush();  //make sure all the data was written to the SD card
@@ -541,14 +557,20 @@ doneSettingIntegration:
     digitalRead(batteryChargerStatus)?dataFile.print("No\t"):dataFile.print("Yes\t"); //if the 3.7v battery is charging 
     dataFile.close();
     writeConfigFile();                  //update the config file with any changes
-    Blink(WHITE, 100, 3);           
+    Blink(WHITE, 100, 3);               //All Done
+    
+    //Turn off the 5Volt source first, to stop the LiIon battery from charging
+    //Otherwise the charging circuit could trigger the alarm
+    
+    digitalWrite(fiveVoltEnable, LOW);      //turn off the five volt dc-dc converter - now we are operating from the 3.7v battery
+    delay(100);
     RTC.clearAlarmFlags();              //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
     setRTCAlarm(dataLogSeconds, dataLogMinutes, dataLogHours);              //set the alarm for some time from now
-    digitalWrite(fiveVoltEnable, LOW);      //turn off the five volt dc-dc converter - now we are operating from the 3.7v battery
     sleepNow();    //go to sleep
-    digitalWrite(fiveVoltEnable, HIGH);     //if we get here, then we just woke up - we need the 5V line to do the reset
-    delay(10);
+    //Next 2 lines were required with v1 hardware - should no longer be necessary
+//    digitalWrite(fiveVoltEnable, HIGH);     //if we get here, then we just woke up - we need the 5V line to do the reset
+//    delay(10);
     digitalWrite(selfReset, HIGH);    //After wake up, reset the arduino
   }
   loopErrors = 0;
@@ -674,22 +696,18 @@ void sleepNow(){         // here we put the arduino to sleep
    * 
    */
 
-  set_sleep_mode(SLEEP_MODE_PWR_SAVE);   // sleep mode is set here
-
-  sleep_enable();          // enables the sleep bit in the mcucr register
-  // so sleep is possible. just a safety pin 
-
-  attachInterrupt(1, rtcAlarmISR, LOW); // use interrupt 1 (pin 3) and run function
-                                        // wakeUpNow when pin 3 gets LOW 
-
-  sleep_mode();          // here the device is actually put to sleep!!
-  // THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP
-
-  sleep_disable();         // first thing after waking from sleep:
-  // disable sleep...
-  detachInterrupt(1);      // disables interrupt 1 on pin 3 so the 
-                           // wakeUpNow code will not be executed 
-                           // during normal running time.
+  set_sleep_mode(SLEEP_MODE_PWR_SAVE);   // Set which sleep mode to enter
+  sleep_enable();                        // Enable the sleep bit in the mcucr register
+  attachInterrupt(1, rtcAlarmISR, LOW); // Use interrupt 1 (pin 3) and run function
+                                        // rtcAlarmISR when pin 3 gets LOW 
+  sleep_mode();                         // Put device to sleep!!
+  
+  //******THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP*********//
+  
+  sleep_disable();                     // disable sleept first thing after waking from sleep:
+  detachInterrupt(1);                  // disables interrupt 1 on pin 3 so the 
+                                       // rtcAlarmISR code will not be executed 
+                                       // during normal running time.
 }
 
 //check if USB4000 is responding while in ASCII mode
@@ -735,15 +753,24 @@ boolean asciiACKRead(uint8_t mode){
   return false;
 }
 
+//Blink an LED color "blinks" number of times 
 void Blink (uint8_t color, int timing, int blinks){
   for(int i = 0 ; i< blinks; i++){
-    digitalWrite(rgbLEDs[0], bitRead(color, 0));
-    digitalWrite(rgbLEDs[1], bitRead(color, 1));
-    digitalWrite(rgbLEDs[2], bitRead(color, 2));
-    delay(timing);
-    digitalWrite(rgbLEDs[0] , LOW);
-    digitalWrite(rgbLEDs[1] , LOW);
-    digitalWrite(rgbLEDs[2] , LOW);
+    SetLEDColorWithDelay(&color, timing);
     delay(timing);
   }
+}
+
+// Turn on the LED to a color for "timing" milliseconds
+// Turn off LED when done
+void SetLEDColorWithDelay(const uint8_t *color, int timing) {
+    SetLEDColor(color);
+    delay(timing);
+    SetLEDColor(&BLACK);
+}
+
+void SetLEDColor(const uint8_t *color){
+  digitalWrite(rgbLEDs[0], bitRead(*color, 0));
+  digitalWrite(rgbLEDs[1], bitRead(*color, 1));
+  digitalWrite(rgbLEDs[2], bitRead(*color, 2));  
 }
