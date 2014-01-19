@@ -49,7 +49,7 @@ const uint8_t USB4000_ERROR_5 = (5<<3) | TEAL;
 //PIN ASSIGNMENTS
 const uint8_t SpecRx = 0;
 const uint8_t SpecTx = 1;
-const uint8_t ledLatchEnable = 2;
+const uint8_t ledOutputEnable = 2;
 // RTC Alarm and battery charger status are both pin 3
 // TODO the code must be change to handle this
 // This pin is pulled up to the Arduino Voltage
@@ -58,21 +58,20 @@ const uint8_t ledLatchEnable = 2;
 const uint8_t batteryChargerStatus = 3;
 const uint8_t rtcAlarm = 3;
 const uint8_t specTrigger = 4;
-const uint8_t ledOutputEnable = 5;
+const uint8_t ledLatchEnable = 5;
 const uint8_t selfReset = 6;
-const uint8_t redLED = 7;
+
 const uint8_t twelveVoltEnable = 8;
 const uint8_t fiveVoltEnable = 9;
 
 const uint8_t csSD = A0;
 const uint8_t csRTC = A1;
 
-const uint8_t rgbLEDs [] = {7, A3, A2};
-
-const byte greenLED = A3;
-const byte blueLED = A2;
-const byte batteryVoltage48 = A4;
-const byte batteryVoltage37 = A5;
+const uint8_t redLED = 7;
+const uint8_t greenLED = A3;
+const uint8_t blueLED = A2;
+const uint8_t batteryVoltage48 = A4;
+const uint8_t batteryVoltage37 = A5;
 
 
 //GLOBAL VARIABLES
@@ -203,10 +202,8 @@ void setup(){
   RTC.clearAlarmFlags();               //clear the alarm flags because we don't know what state the RTC was in
   currentTime = RTC.getRTCDateTime();  //need to do this initial read - otherwise strange bug occurs
                                        //where SD.open() fails the first time.
-  SetLEDColor(&WHITE);                    //strobe White
-  delay(100);
-  SetLEDColor(&BLACK);  
-  dateTime2String(&currentTime);        //convert date and time to human readable string
+
+  dateTime2String(&currentTime);       //convert date and time to human readable string
                                        //which is stored in the variable dateStr
   
   //If a configuration file exists, load its info  
@@ -299,7 +296,7 @@ void setup(){
   
   pinMode(rtcAlarm, INPUT);            //Interrupt pin for RTC alarm
   
-  //Start the TLLC5916 LED driver with pins 4 and 5 controlling the SPI communications
+  //Start the TLLC5916 LED driver with pins 5 and 7 controlling the SPI communications
   tlc5916.begin(ledOutputEnable,ledLatchEnable);
   
   delay(500);
@@ -559,14 +556,16 @@ doneSettingIntegration:
     writeConfigFile();                  //update the config file with any changes
     Blink(WHITE, 100, 3);               //All Done
     
-    //Turn off the 5Volt source first, to stop the LiIon battery from charging
-    //Otherwise the charging circuit could trigger the alarm
-    
-    digitalWrite(fiveVoltEnable, LOW);      //turn off the five volt dc-dc converter - now we are operating from the 3.7v battery
-    delay(100);
+    //The RTC neesd to hav 5V applied ot it to set the alarm - I don't know why.
+    delay(1000);
     RTC.clearAlarmFlags();              //clear the alarm flags so that they can be triggered later
     currentTime = RTC.getRTCDateTime();
     setRTCAlarm(dataLogSeconds, dataLogMinutes, dataLogHours);              //set the alarm for some time from now
+
+    //Now turn off the 5V supply and wait before setting the interrupt    
+    digitalWrite(fiveVoltEnable, LOW);      //turn off the five volt dc-dc converter - now we are operating from the 3.7v battery
+    delay(1000);
+    
     sleepNow();    //go to sleep
     //Next 2 lines were required with v1 hardware - should no longer be necessary
 //    digitalWrite(fiveVoltEnable, HIGH);     //if we get here, then we just woke up - we need the 5V line to do the reset
@@ -770,7 +769,7 @@ void SetLEDColorWithDelay(const uint8_t *color, int timing) {
 }
 
 void SetLEDColor(const uint8_t *color){
-  digitalWrite(rgbLEDs[0], bitRead(*color, 0));
-  digitalWrite(rgbLEDs[1], bitRead(*color, 1));
-  digitalWrite(rgbLEDs[2], bitRead(*color, 2));  
+  digitalWrite(redLED, bitRead(*color, 0));
+  digitalWrite(greenLED, bitRead(*color, 1));
+  digitalWrite(blueLED, bitRead(*color, 2));  
 }
